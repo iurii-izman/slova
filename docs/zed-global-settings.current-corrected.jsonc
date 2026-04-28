@@ -1,0 +1,246 @@
+// Zed settings
+//
+// For information on how to configure Zed, see the Zed
+// documentation: https://zed.dev/docs/configuring-zed
+//
+// To see all of Zed's default settings without changing your
+// custom settings, run `zed: open default settings` from the
+// command palette (cmd-shift-p / ctrl-shift-p)
+//
+// ════════════════════════════════════════════════════════════════
+// ИСПРАВЛЕНИЯ относительно текущего settings.json:
+//
+// 1. model_parameters → temperature: 1 теперь привязан только к
+//    claude-sonnet-4-6 (требуется для extended thinking).
+//    Без этого temperature=1 применялась ко ВСЕМ моделям, включая
+//    gpt-5-mini, что ухудшало стабильность кода.
+//
+// 2. architect-review profile → обновлена модель с claude-sonnet-4-5
+//    на claude-sonnet-4-6 (соответствует глобальному default_model).
+//
+// 3. mcp-server-github → убран из settings (GITHUB_PERSONAL_ACCESS_TOKEN
+//    был placeholder, не работал и мог вызывать ошибки в Agent Panel).
+//    Подключи GitHub MCP через расширение Zed (Extensions →
+//    "GitHub MCP") после того как появится реальный PAT.
+//
+// 4. Глобальный default_model оставлен как claude-sonnet-4-6.
+//    ВНИМАНИЕ: из-за бага Zed (#48451) профильная модель cheap-coder
+//    (gpt-5-mini) не всегда применяется при старте — вместо неё
+//    используется этот глобальный default. Если важно экономить,
+//    замени global default_model на gpt-5-mini тоже.
+// ════════════════════════════════════════════════════════════════
+{
+  "theme": "Gruvbox Light",
+  "agent": {
+    "default_profile": "cheap-coder",
+
+    // Глобальный fallback. Используется при старте из-за Zed bug #48451.
+    // Если хочешь гарантированно дешёвый старт — замени на gpt-5-mini.
+    "default_model": {
+      "effort": "medium",
+      "enable_thinking": true,
+      "provider": "zed.dev",
+      "model": "claude-sonnet-4-6"
+    },
+
+    "inline_assistant_model": {
+      "provider": "zed.dev",
+      "model": "gpt-5-nano"
+    },
+    "commit_message_model": {
+      "provider": "zed.dev",
+      "model": "gpt-5-nano"
+    },
+    "thread_summary_model": {
+      "provider": "zed.dev",
+      "model": "gpt-5-nano"
+    },
+
+    // ИСПРАВЛЕНО: temperature=1 только для Claude thinking.
+    // Без scope применялась бы и к gpt-5-mini, что вредит качеству кода.
+    "model_parameters": [
+      {
+        "provider": "zed.dev",
+        "model": "claude-sonnet-4-6",
+        "temperature": 1
+      }
+    ],
+
+    "use_modifier_to_send": true,
+    "expand_edit_card": false,
+    "expand_terminal_card": false,
+    "enable_feedback": false,
+
+    "tool_permissions": {
+      "default": "allow",
+      "tools": {
+        "terminal": {
+          "default": "confirm",
+          "always_allow": [
+            { "pattern": "^git\\s+(status|diff|log|show|branch)(\\s|$)" },
+            { "pattern": "^cargo\\s+(fmt|check|test|clippy|build)(\\s|$)" },
+            { "pattern": "^npm\\s+(run\\s+(build|lint|typecheck|test)|test)(\\s|$)" }
+          ],
+          "always_confirm": [
+            { "pattern": "\\b(npm|pnpm|yarn)\\s+(install|add|remove|update)\\b" },
+            { "pattern": "\\bcargo\\s+(install|update)\\b" },
+            { "pattern": "\\btauri\\s+build\\b" },
+            { "pattern": "\\bgit\\s+(push|reset|clean|checkout|switch|merge|rebase|commit)\\b" },
+            { "pattern": "\\b(rm|del|Remove-Item)\\b" }
+          ],
+          "always_deny": [
+            { "pattern": "rm\\s+-rf\\s+(/|~)" },
+            { "pattern": "GROQ_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|gsk_" }
+          ]
+        },
+        "edit_file": {
+          "default": "allow",
+          "always_deny": [
+            { "pattern": "(^|/|\\\\)\\.env(\\..*)?$" },
+            { "pattern": "\\.(pem|key|pfx|p12)$" }
+          ]
+        },
+        "delete_path": {
+          "default": "confirm",
+          "always_deny": [
+            { "pattern": "transcriber-spec\\.md$" },
+            { "pattern": "transcriber-architecture-analysis\\.md$" },
+            { "pattern": "transcriber-autopilot-development-plan\\.md$" }
+          ]
+        },
+        "move_path": {
+          "default": "confirm"
+        },
+        "open": {
+          "default": "confirm"
+        },
+        "mcp:github:create_issue": {
+          "default": "confirm"
+        },
+        "mcp:github:create_pull_request": {
+          "default": "confirm"
+        }
+      }
+    },
+
+    "profiles": {
+      // Основной профиль для работы по автопилот-блокам.
+      // Дешёвая модель, все инструменты для редактирования доступны.
+      "cheap-coder": {
+        "name": "Cheap Coder",
+        "default_model": {
+          "provider": "zed.dev",
+          "model": "gpt-5-mini"
+        },
+        "tools": {
+          "fetch": true,
+          "thinking": true,
+          "copy_path": true,
+          "find_path": true,
+          "delete_path": true,
+          "create_directory": true,
+          "list_directory": true,
+          "diagnostics": true,
+          "read_file": true,
+          "open": false,
+          "move_path": true,
+          "grep": true,
+          "edit_file": true,
+          "terminal": true
+        },
+        "enable_all_context_servers": false,
+        "context_servers": {
+          "context7": {
+            "tools": {
+              "resolve-library-id": true,
+              "get-library-docs": true
+            }
+          }
+        }
+      },
+
+      // Архитектурные развилки и финальный review.
+      // ИСПРАВЛЕНО: обновлена модель с claude-sonnet-4-5 на claude-sonnet-4-6.
+      // edit_file и terminal отключены — только чтение и анализ.
+      "architect-review": {
+        "name": "Architect / Review",
+        "default_model": {
+          "provider": "zed.dev",
+          "model": "claude-sonnet-4-6"
+        },
+        "tools": {
+          "fetch": true,
+          "thinking": true,
+          "copy_path": true,
+          "find_path": true,
+          "delete_path": false,
+          "create_directory": false,
+          "list_directory": true,
+          "diagnostics": true,
+          "read_file": true,
+          "open": false,
+          "move_path": false,
+          "grep": true,
+          "edit_file": false,
+          "terminal": false
+        },
+        "enable_all_context_servers": false,
+        "context_servers": {
+          "context7": {
+            "tools": {
+              "resolve-library-id": true,
+              "get-library-docs": true
+            }
+          }
+        }
+      },
+
+      // Независимый security / quality аудит.
+      // Без права редактирования и terminal.
+      "readonly-auditor": {
+        "name": "Read-only Auditor",
+        "default_model": {
+          "provider": "zed.dev",
+          "model": "gpt-5-mini"
+        },
+        "tools": {
+          "fetch": true,
+          "thinking": true,
+          "copy_path": false,
+          "find_path": true,
+          "delete_path": false,
+          "create_directory": false,
+          "list_directory": true,
+          "diagnostics": true,
+          "read_file": true,
+          "open": false,
+          "move_path": false,
+          "grep": true,
+          "edit_file": false,
+          "terminal": false
+        },
+        "enable_all_context_servers": false,
+        "context_servers": {}
+      }
+    }
+  },
+
+  "context_servers": {
+    // Context7: актуальная документация по Tauri, Solid, Tokio, sqlx и т.д.
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "env": {}
+    }
+
+    // GitHub MCP: подключить после того как появится реальный PAT.
+    // Лучше использовать расширение Zed (Extensions → "GitHub MCP"),
+    // тогда токен хранится в keyring, а не в settings.json.
+    // "mcp-server-github": {
+    //   "enabled": true,
+    //   "settings": {
+    //     "github_personal_access_token": "<YOUR_REAL_PAT_HERE>"
+    //   }
+    // }
+  }
+}

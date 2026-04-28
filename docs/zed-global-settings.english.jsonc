@@ -1,0 +1,120 @@
+// Zed global settings example for VideoTranscriber
+// Copy relevant parts into your global Zed settings file:
+// Windows: %APPDATA%\Zed\settings.json
+// Open from Zed: Ctrl+Shift+P -> "zed: open settings file"
+// IMPORTANT:
+//  - Do NOT commit real API keys or tokens.
+//  - Adjust provider/model names to models available in your Zed account.
+//  - Keep expensive models out of the default profile to save cost.
+
+{
+  "theme": "Gruvbox Light",
+  "agent": {
+    "default_profile": "cheap-coder",
+
+    // Global fallback model. Due to a Zed startup bug the global default
+    // can be used briefly at editor startup before the profile model is applied.
+    // If you want guaranteed cheap startup, set this to gpt-5-mini.
+    "default_model": {
+      "effort": "medium",
+      "enable_thinking": true,
+      "provider": "zed.dev",
+      "model": "claude-sonnet-4-6"
+    },
+
+    "inline_assistant_model": { "provider": "zed.dev", "model": "gpt-5-nano" },
+    "commit_message_model": { "provider": "zed.dev", "model": "gpt-5-nano" },
+    "thread_summary_model": { "provider": "zed.dev", "model": "gpt-5-nano" },
+
+    // Scope temperature only to the expensive model used for "thinking".
+    // This prevents the same temperature from affecting cheap models.
+    "model_parameters": [
+      { "provider": "zed.dev", "model": "claude-sonnet-4-6", "temperature": 1 }
+    ],
+
+    "use_modifier_to_send": true,
+    "expand_edit_card": false,
+    "expand_terminal_card": false,
+    "enable_feedback": false,
+
+    "tool_permissions": {
+      "default": "allow",
+      "tools": {
+        "terminal": {
+          "default": "confirm",
+          "always_allow": [
+            { "pattern": "^git\\s+(status|diff|log|show|branch)(\\s|$)" },
+            { "pattern": "^cargo\\s+(fmt|check|test|clippy|build)(\\s|$)" },
+            { "pattern": "^npm\\s+(run\\s+(build|lint|typecheck|test)|test)(\\s|$)" }
+          ],
+          "always_confirm": [
+            { "pattern": "\\b(npm|pnpm|yarn)\\s+(install|add|remove|update)\\b" },
+            { "pattern": "\\bcargo\\s+(install|update)\\b" },
+            { "pattern": "\\btauri\\s+build\\b" },
+            { "pattern": "\\bgit\\s+(push|reset|clean|checkout|switch|merge|rebase|commit)\\b" },
+            { "pattern": "\\b(rm|del|Remove-Item)\\b" }
+          ],
+          "always_deny": [
+            { "pattern": "rm\\s+-rf\\s+(/|~)" },
+            { "pattern": "GROQ_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|gsk_" }
+          ]
+        },
+        "edit_file": {
+          "default": "allow",
+          "always_deny": [
+            { "pattern": "(^|/|\\\\)\\.env(\\..*)?$" },
+            { "pattern": "\\.(pem|key|pfx|p12)$" }
+          ]
+        },
+        "delete_path": {
+          "default": "confirm",
+          "always_deny": [
+            { "pattern": "transcriber-spec\\.md$" },
+            { "pattern": "transcriber-architecture-analysis\\.md$" },
+            { "pattern": "transcriber-autopilot-development-plan\\.md$" }
+          ]
+        },
+        "move_path": { "default": "confirm" },
+        "open": { "default": "confirm" },
+        "mcp:github:create_issue": { "default": "confirm" },
+        "mcp:github:create_pull_request": { "default": "confirm" }
+      }
+    },
+
+    "profiles": {
+      "cheap-coder": {
+        "name": "Cheap Coder",
+        "default_model": { "provider": "zed.dev", "model": "gpt-5-mini" },
+        "tools": {
+          "fetch": true, "thinking": true, "copy_path": true, "find_path": true,
+          "delete_path": true, "create_directory": true, "list_directory": true,
+          "diagnostics": true, "read_file": true, "open": false, "move_path": true,
+          "grep": true, "edit_file": true, "terminal": true
+        },
+        "enable_all_context_servers": false,
+        "context_servers": { "context7": { "tools": { "resolve-library-id": true, "get-library-docs": true } } }
+      },
+
+      "architect-review": {
+        "name": "Architect / Review",
+        "default_model": { "provider": "zed.dev", "model": "claude-sonnet-4-6" },
+        "tools": { "fetch": true, "thinking": true, "copy_path": true, "find_path": true, "delete_path": false, "create_directory": false, "list_directory": true, "diagnostics": true, "read_file": true, "open": false, "move_path": false, "grep": true, "edit_file": false, "terminal": false },
+        "enable_all_context_servers": false,
+        "context_servers": { "context7": { "tools": { "resolve-library-id": true, "get-library-docs": true } } }
+      },
+
+      "readonly-auditor": {
+        "name": "Read-only Auditor",
+        "default_model": { "provider": "zed.dev", "model": "gpt-5-mini" },
+        "tools": { "fetch": true, "thinking": true, "copy_path": false, "find_path": true, "delete_path": false, "create_directory": false, "list_directory": true, "diagnostics": true, "read_file": true, "open": false, "move_path": false, "grep": true, "edit_file": false, "terminal": false },
+        "enable_all_context_servers": false,
+        "context_servers": {}
+      }
+    }
+  },
+
+  "context_servers": {
+    "context7": { "command": "npx", "args": ["-y", "@upstash/context7-mcp"], "env": {} }
+    // If you want GitHub MCP, install the official MCP extension and store the PAT in your OS keyring.
+  }
+}

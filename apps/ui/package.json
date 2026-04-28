@@ -1,0 +1,35 @@
+{
+  "name": "video-transcriber-ui",
+  "version": "0.1.0",
+  "description": "Frontend for VideoTranscriber - Fast batch transcription with Groq Whisper",
+  "type": "module",
+  "private": true,
+  "author": "Yurii Izman",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iurii-izman/slova.git"
+  },
+  "bugs": {
+    "url": "https://github.com/iurii-izman/slova/issues"
+  },
+  "homepage": "https://github.com/iurii-izman/slova",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "solid-js": "^1.6.11",
+    "@tauri-apps/api": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.4",
+    "vite": "^4.3.0",
+    "vite-plugin-solid": "^2.6.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

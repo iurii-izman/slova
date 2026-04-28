@@ -1,0 +1,48 @@
+[package]
+name = "slova-tauri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Fast batch transcription desktop app for videos using Groq Whisper API"
+
+[features]
+with_tauri = []
+
+[dependencies]
+# Core
+tauri = "^2.0"
+
+# Serialization & types
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Async runtime (already in Tauri but explicit)
+tokio = { version = "1.0", features = ["full"] }
+
+# Database
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "macros"] }
+sqlx-sqlite = "0.7"
+
+# Secrets & credentials
+keyring = "2.2"
+
+# Filesystem & utilities
+tempfile = "3.8"
+sha2 = "0.10"
+hex = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+
+# TODO: add specta/tauri-specta when versions align with tauri 2.10.x
+
+[build-dependencies]
+# tauri-build to generate context/asset manifest during build
+tauri-build = "^2.0"
+base64 = "0.21.0"

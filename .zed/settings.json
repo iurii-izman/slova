@@ -1,0 +1,88 @@
+{
+  "tab_size": 2,
+  "hard_tabs": false,
+  "format_on_save": "on",
+  "remove_trailing_whitespace_on_save": true,
+  "ensure_final_newline_on_save": true,
+  "preferred_line_length": 100,
+  "soft_wrap": "preferred_line_length",
+  "show_whitespaces": "selection",
+  "file_scan_exclusions": [
+    "**/.git",
+    "**/.DS_Store",
+    "**/node_modules",
+    "**/dist",
+    "**/build",
+    "**/.vite",
+    "**/.turbo",
+    "**/.next",
+    "**/coverage",
+    "**/target",
+    "**/src-tauri/target",
+    "**/.sqlx",
+    "**/*.log",
+  ],
+  "languages": {
+    "Rust": {
+      "tab_size": 4,
+      "formatter": "language_server",
+      "format_on_save": "on",
+      "preferred_line_length": 100,
+    },
+    "TypeScript": {
+      "tab_size": 2,
+      "format_on_save": "on",
+      "preferred_line_length": 100,
+    },
+    "TSX": {
+      "tab_size": 2,
+      "format_on_save": "on",
+      "preferred_line_length": 100,
+    },
+    "JavaScript": {
+      "tab_size": 2,
+      "format_on_save": "on",
+      "preferred_line_length": 100,
+    },
+    "JSON": {
+      "tab_size": 2,
+      "format_on_save": "on",
+    },
+    "Markdown": {
+      "tab_size": 2,
+      "soft_wrap": "editor_width",
+      "format_on_save": "off",
+      "preferred_line_length": 100,
+    },
+  },
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "rust": {
+          "analyzerTargetDir": true,
+        },
+        "inlayHints": {
+          "maxLength": null,
+          "lifetimeElisionHints": {
+            "enable": "skip_trivial",
+            "useParameterNames": true,
+          },
+          "closureReturnTypeHints": {
+            "enable": "always",
+          },
+        },
+        "diagnostics": {
+          "experimental": {
+            "enable": true,
+          },
+        },
+        "cargo": {
+          "allTargets": false,
+        },
+        "check": {
+          "workspace": false,
+        },
+      },
+    },
+  },
+}

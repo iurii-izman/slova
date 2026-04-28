@@ -1,0 +1,104 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-tests:
+    name: Rust Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [stable]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: src-tauri/target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run cargo check
+        run: |
+          cd src-tauri
+          cargo check --all-targets
+
+      - name: Run cargo fmt check
+        run: |
+          cd src-tauri
+          cargo fmt -- --check
+
+      - name: Run cargo clippy
+        run: |
+          cd src-tauri
+          cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: |
+          cd src-tauri
+          cargo test --lib
+
+  typescript-checks:
+    name: TypeScript Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: 'apps/ui/package-lock.json'
+
+      - name: Install dependencies
+        run: |
+          cd apps/ui
+          npm install
+
+      - name: Type check
+        run: |
+          cd apps/ui
+          npm run check
+
+      - name: Build
+        run: |
+          cd apps/ui
+          npm run build
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run cargo audit
+        uses: rustsec/audit-check-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

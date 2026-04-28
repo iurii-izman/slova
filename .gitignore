@@ -1,0 +1,115 @@
+# Node
+node_modules/
+apps/ui/dist/
+apps/ui/.parcel-cache
+
+# Rust
+/target/
+**/Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Tauri
+src-tauri/target/
+src-tauri/dist/
+src-tauri-ui/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.sublime-project
+.sublime-workspace
+.vscode-settings.json
+.vim
+.nvim
+
+# IDE
+*.iml
+.gradle
+.gradlew
+.gradlew.bat
+.classpath
+.project
+.settings/
+bin/
+out/
+
+# OS
+Thumbs.db
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Secrets (NEVER commit these)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+.credentials
+.aws/
+.ssh/
+
+# Build artifacts
+dist/
+build/
+releases/
+bundles/
+
+# Cache
+.cache/
+.eslintcache
+.stylelintcache
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temp
+tmp/
+temp/
+*.tmp
+.tmp/
+
+# macOS
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Windows
+desktop.ini
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Dependencies
+pnpm-lock.yaml
+yarn.lock
+package-lock.json
+
+# Local Tauri build
+target/
+src-tauri/icons/icon.png
