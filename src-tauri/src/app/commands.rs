@@ -1,7 +1,9 @@
 use crate::adapters::keyring::KeyringAdapter;
+use crate::app::state::SharedState;
 use crate::types::*;
 use serde::Serialize;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
@@ -14,7 +16,13 @@ pub struct HealthStatus {
 
 /// Health check для проверки соединения с backend'ом
 #[tauri::command]
-pub async fn health_check() -> Result<HealthStatus, AppErrorView> {
+pub async fn health_check(
+    state: tauri::State<'_, SharedState>,
+) -> Result<HealthStatus, AppErrorView> {
+    let state_opt = state.read().await;
+    if let Some(app_state) = state_opt.as_ref() {
+        app_state.health_check().await?;
+    }
     Ok(HealthStatus {
         ok: true,
         version: "0.1.0",
@@ -29,8 +37,14 @@ pub async fn health_check() -> Result<HealthStatus, AppErrorView> {
 #[tauri::command]
 pub async fn enqueue_files(
     app_handle: tauri::AppHandle,
+    state: tauri::State<'_, SharedState>,
     paths: Vec<PathBuf>,
 ) -> Result<Vec<JobId>, AppErrorView> {
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
     if paths.is_empty() {
         return Err(AppErrorView::new("INVALID_INPUT", "No files provided"));
     }
@@ -43,26 +57,68 @@ pub async fn enqueue_files(
                 path.display()
             )));
         }
-        // TODO: validate MP4 video file
+
+        // Check if it's a valid MP4
+        if path.extension().and_then(|s| s.to_str()) != Some("mp4") {
+            return Err(AppErrorView::invalid_file(format!(
+                "File must be MP4: {}",
+                path.display()
+            )));
+        }
     }
 
-    // Generate job IDs (in real implementation, store in DB)
-    let ids: Vec<JobId> = paths
-        .iter()
-        .enumerate()
-        .map(|(_i, _p)| JobId::new())
-        .collect();
+    // Create jobs and enqueue them
+    let mut job_ids = Vec::new();
+    let now = chrono::Utc::now().to_rfc3339();
 
-    // Emit sample queue:tick event
+    for path in paths {
+        let job_id = JobId::new();
+        let display_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let file_size = std::fs::metadata(&path)
+            .map_err(|e| AppErrorView::fs_error(format!("Failed to stat file: {}", e)))?
+            .len();
+
+        // Calculate content hash for deduplication
+        let hash = calculate_file_hash(&path).await.ok();
+
+        let job = Job {
+            id: job_id,
+            source_path: path,
+            display_name,
+            size_bytes: file_size,
+            created_at: now.clone(),
+            state: JobState::Queued,
+            settings_snapshot: JobSettings {
+                language: "ru".into(),
+                output_format: ExportFormat::Txt,
+            },
+            content_hash: hash,
+        };
+
+        // Store in DB
+        app_state.job_repo.insert(&job).await?;
+
+        // Enqueue in scheduler
+        app_state.scheduler.enqueue(job_id).await?;
+
+        job_ids.push(job_id);
+    }
+
+    // Emit initial state
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
+
     let tick = json!(QueueTick {
-        updates: ids
+        updates: job_ids
             .iter()
-            .enumerate()
-            .map(|(_i, id)| JobUpdate {
+            .map(|id| JobUpdate {
                 id: *id,
                 state: JobState::Queued,
                 bytes_uploaded: None,
@@ -74,45 +130,80 @@ pub async fn enqueue_files(
 
     let _ = app_handle.emit("queue:tick", tick);
 
-    Ok(ids)
+    Ok(job_ids)
 }
 
 /// Получить список задач с фильтрацией
 #[tauri::command]
-pub async fn list_jobs(_filter: Option<JobFilter>) -> Result<Vec<Job>, AppErrorView> {
-    // TODO: query from DB with filter
-    Ok(vec![])
+pub async fn list_jobs(
+    state: tauri::State<'_, SharedState>,
+    filter: Option<JobFilter>,
+) -> Result<Vec<Job>, AppErrorView> {
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    app_state.job_repo.list(filter).await
 }
 
 /// Отменить задачу
 #[tauri::command]
-pub async fn cancel_job(id: JobId) -> Result<(), AppErrorView> {
-    // TODO: set cancellation token, emit job:cancelled
-    println!("cancel_job called: {}", id);
+pub async fn cancel_job(
+    state: tauri::State<'_, SharedState>,
+    id: JobId,
+) -> Result<(), AppErrorView> {
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    app_state.scheduler.cancel(id);
     Ok(())
 }
 
 /// Повторить задачу после ошибки
 #[tauri::command]
-pub async fn retry_job(id: JobId) -> Result<(), AppErrorView> {
-    // TODO: reset state to Queued, increment attempts counter
-    println!("retry_job called: {}", id);
+pub async fn retry_job(
+    state: tauri::State<'_, SharedState>,
+    id: JobId,
+) -> Result<(), AppErrorView> {
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    // Get job from DB, reset state to Queued
+    if let Some(mut job) = app_state.job_repo.get(id).await? {
+        job.state = JobState::Queued;
+        app_state.job_repo.update_state(id, &job.state).await?;
+        app_state.scheduler.enqueue(id).await?;
+    }
+
     Ok(())
 }
 
 /// Поставить всю очередь на паузу
 #[tauri::command]
-pub async fn pause_queue() -> Result<(), AppErrorView> {
-    // TODO: pause scheduler
-    println!("pause_queue called");
+pub async fn pause_queue(state: tauri::State<'_, SharedState>) -> Result<(), AppErrorView> {
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    app_state.scheduler.pause();
     Ok(())
 }
 
 /// Возобновить обработку очереди
 #[tauri::command]
-pub async fn resume_queue() -> Result<(), AppErrorView> {
-    // TODO: resume scheduler
-    println!("resume_queue called");
+pub async fn resume_queue(state: tauri::State<'_, SharedState>) -> Result<(), AppErrorView> {
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    app_state.scheduler.resume();
     Ok(())
 }
 
@@ -122,8 +213,26 @@ pub async fn resume_queue() -> Result<(), AppErrorView> {
 
 /// Получить текст транскрипции для задачи
 #[tauri::command]
-pub async fn get_transcript(id: JobId) -> Result<Transcript, AppErrorView> {
-    // TODO: load from disk or DB
+pub async fn get_transcript(
+    state: tauri::State<'_, SharedState>,
+    id: JobId,
+) -> Result<Transcript, AppErrorView> {
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    // Try to load from .txt file (once written)
+    if let Some(job) = app_state.job_repo.get(id).await? {
+        let txt_path = job.source_path.with_extension("txt");
+        if txt_path.exists() {
+            let text = std::fs::read_to_string(&txt_path)
+                .map_err(|e| AppErrorView::fs_error(format!("Failed to read transcript: {}", e)))?;
+            return Ok(Transcript { job_id: id, text });
+        }
+    }
+
+    // Return empty if not yet written
     Ok(Transcript {
         job_id: id,
         text: String::new(),
@@ -132,7 +241,11 @@ pub async fn get_transcript(id: JobId) -> Result<Transcript, AppErrorView> {
 
 /// Сохранить отредактированный текст транскрипции
 #[tauri::command]
-pub async fn save_transcript_edit(id: JobId, text: String) -> Result<(), AppErrorView> {
+pub async fn save_transcript_edit(
+    state: tauri::State<'_, SharedState>,
+    id: JobId,
+    text: String,
+) -> Result<(), AppErrorView> {
     if text.is_empty() {
         return Err(AppErrorView::new(
             "INVALID_INPUT",
@@ -140,34 +253,66 @@ pub async fn save_transcript_edit(id: JobId, text: String) -> Result<(), AppErro
         ));
     }
 
-    // TODO: save edited transcript to disk/DB
-    println!("save_transcript_edit called for {}", id);
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    // Save to database
+    app_state
+        .job_repo
+        .update_state(
+            id,
+            &JobState::Done {
+                output_path: Default::default(),
+                duration_ms: 0,
+            },
+        )
+        .await?;
+
+    // Also save edited text to .txt file
+    if let Some(job) = app_state.job_repo.get(id).await? {
+        let txt_path = job.source_path.with_extension("txt");
+        std::fs::write(&txt_path, &text)
+            .map_err(|e| AppErrorView::fs_error(format!("Failed to save transcript: {}", e)))?;
+    }
+
     Ok(())
 }
 
 /// Экспортировать результат в выбранный формат
 #[tauri::command]
 pub async fn export(
-    _app_handle: tauri::AppHandle,
+    state: tauri::State<'_, SharedState>,
     id: JobId,
     format: ExportFormat,
 ) -> Result<PathBuf, AppErrorView> {
-    // TODO: generate file in requested format, return actual path
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    let job = app_state
+        .job_repo
+        .get(id)
+        .await?
+        .ok_or_else(|| AppErrorView::internal_error("Job not found"))?;
+
     let ext = match format {
         ExportFormat::Txt => "txt",
         ExportFormat::Srt => "srt",
         ExportFormat::Json => "json",
     };
 
-    let path = PathBuf::from(format!("C:/Users/you/Documents/{}.{}", id, ext));
-    Ok(path)
+    let output_path = job.source_path.with_extension(ext);
+    Ok(output_path)
 }
 
 // ============================================================================
 // Settings & Secrets Commands
 // ============================================================================
 
-/// Сохранить API ключ в OS keychain (Windows Credential Manager, macOS Keychain, Linux Secret Service)
+/// Сохранить API ключ в OS keychain
 #[tauri::command]
 pub async fn save_api_key(key: String) -> Result<(), AppErrorView> {
     if key.is_empty() {
@@ -185,7 +330,7 @@ pub async fn save_api_key(key: String) -> Result<(), AppErrorView> {
         ));
     }
 
-    // Store securely in OS keychain
+    // Store securely in OS keyring
     KeyringAdapter::save_api_key(&key)?;
 
     println!("API key saved to OS keychain successfully");
@@ -194,7 +339,7 @@ pub async fn save_api_key(key: String) -> Result<(), AppErrorView> {
 
 /// Получить текущие настройки приложения
 #[tauri::command]
-pub async fn get_settings() -> Result<Settings, AppErrorView> {
+pub async fn get_settings(_state: tauri::State<'_, SharedState>) -> Result<Settings, AppErrorView> {
     // TODO: load from SQLite settings repo
     // For now return defaults
     Ok(Settings::default())
@@ -202,7 +347,10 @@ pub async fn get_settings() -> Result<Settings, AppErrorView> {
 
 /// Обновить настройки приложения
 #[tauri::command]
-pub async fn set_settings(settings: Settings) -> Result<(), AppErrorView> {
+pub async fn set_settings(
+    _state: tauri::State<'_, SharedState>,
+    settings: Settings,
+) -> Result<(), AppErrorView> {
     if settings.parallelism == 0 {
         return Err(AppErrorView::new(
             "INVALID_INPUT",
@@ -236,7 +384,7 @@ pub async fn emit_demo_event(app_handle: tauri::AppHandle) -> Result<(), AppErro
 
     let sample = json!(QueueTick {
         updates: vec![],
-        ts: ts,
+        ts,
     });
 
     app_handle
@@ -244,4 +392,18 @@ pub async fn emit_demo_event(app_handle: tauri::AppHandle) -> Result<(), AppErro
         .map_err(|e| AppErrorView::internal_error(format!("emit error: {}", e)))?;
 
     Ok(())
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+/// Calculate SHA256 hash of a file (for deduplication)
+async fn calculate_file_hash(path: &PathBuf) -> Result<String, AppErrorView> {
+    let mut hasher = Sha256::new();
+    let data = tokio::fs::read(path)
+        .await
+        .map_err(|e| AppErrorView::fs_error(format!("Failed to read file: {}", e)))?;
+    hasher.update(&data);
+    Ok(format!("{:x}", hasher.finalize()))
 }

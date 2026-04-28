@@ -5,13 +5,19 @@ mod db;
 mod telemetry;
 mod types;
 
+use crate::adapters::keyring::KeyringAdapter;
+use crate::app::state::SharedState;
+use std::sync::Arc;
+use tauri::Manager;
+use tokio::sync::RwLock;
+
 #[cfg(feature = "with_tauri")]
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            println!("Starting VideoTranscriber v0.1.0");
+            let app_handle = app.handle();
 
-            // Initialize database
+            // Initialize database path
             let db_dir = app
                 .path()
                 .app_data_dir()
@@ -19,9 +25,41 @@ fn main() {
 
             let db_path = db_dir.join("transcriber.db");
 
-            // TODO: Pass database pool to app state
-            // For now, just log that we know where it would go
-            println!("Database will be at: {}", db_path.display());
+            // Create app state asynchronously
+            let db_path_clone = db_path.clone();
+            let app_handle_clone = app_handle.clone();
+
+            tauri::async_runtime::spawn(async move {
+                // Try to load API key from keyring
+                let api_key = match KeyringAdapter::get_api_key() {
+                    Ok(Some(key)) => key,
+                    Ok(None) => {
+                        eprintln!("No API key found in keyring. Please save it first.");
+                        String::new()
+                    }
+                    Err(e) => {
+                        eprintln!("Keyring error: {}. Please save API key first.", e);
+                        String::new()
+                    }
+                };
+
+                // Initialize app state
+                match crate::app::state::AppState::new(db_path_clone, api_key).await {
+                    Ok(state) => {
+                        // Store in Tauri managed state
+                        app_handle_clone.manage(Arc::new(RwLock::new(Some(state))));
+                        println!("VideoTranscriber v0.1.0 initialized successfully");
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to initialize app state: {}", e);
+                        // Store None to signal initialization failure
+                        app_handle_clone.manage(Arc::new(RwLock::new(None)) as SharedState);
+                    }
+                }
+            });
+
+            // Initialize empty state immediately (will be replaced by async task)
+            app.manage(Arc::new(RwLock::new(None)) as SharedState);
 
             Ok(())
         })
@@ -46,8 +84,6 @@ fn main() {
             // Demo/testing
             app::commands::emit_demo_event,
         ])
-        // TODO: fix icon generation in build.rs, then use generate_context!()
-        // For now, skip icon bundling in dev
         .run({
             let context = tauri::generate_context!();
             context

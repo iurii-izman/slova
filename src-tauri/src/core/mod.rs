@@ -7,9 +7,9 @@
 // - Progress tracking and events
 // - Cancellation and pause/resume
 
+pub mod cancellation;
+pub mod pipeline;
+pub mod progress;
+pub mod retry;
 pub mod scheduler;
-// TODO: pub mod pipeline;
-// TODO: pub mod stages;
-// TODO: pub mod retry;
-// TODO: pub mod cancel;
-// TODO: pub mod progress;
+pub mod stages;

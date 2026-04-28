@@ -122,6 +122,15 @@ pub struct JobSettings {
     pub output_format: ExportFormat,
 }
 
+impl Default for JobSettings {
+    fn default() -> Self {
+        JobSettings {
+            language: "ru".into(),
+            output_format: ExportFormat::Txt,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
