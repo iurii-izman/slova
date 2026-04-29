@@ -41,8 +41,25 @@ impl FfmpegAdapter {
         FfmpegAdapter {
             ffmpeg_exe: PathBuf::from("ffmpeg"),
             ffprobe_exe: PathBuf::from("ffprobe"),
-            rnnoise_model: PathBuf::from("rnnoise_model"),
+            rnnoise_model: Self::resolve_default_rnnoise_model_path(),
         }
+    }
+
+    fn resolve_default_rnnoise_model_path() -> PathBuf {
+        let candidates = [
+            PathBuf::from("resources/rnnoise-models/cb.rnnn"),
+            PathBuf::from("src-tauri/resources/rnnoise-models/cb.rnnn"),
+            PathBuf::from("rnnoise_model"), // legacy fallback
+        ];
+
+        for candidate in candidates {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+
+        // Return preferred path even if not yet present, so logs/errors are explicit.
+        PathBuf::from("resources/rnnoise-models/cb.rnnn")
     }
 
     /// Validate MP4 file and get metadata (duration, audio tracks, format, size)

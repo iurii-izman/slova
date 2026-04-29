@@ -1,63 +1,40 @@
-import { createSignal, onMount } from "solid-js";
-
-// Tauri invoke
-import { invoke } from "@tauri-apps/api/tauri";
+import { onMount } from "solid-js";
+import { Router, Route } from "@solidjs/router";
+import { invoke } from "@tauri-apps/api/core";
+import { QueuePage } from "./pages/QueuePage";
+import { DetailPage } from "./pages/DetailPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { ToastContainer } from "./components/ToastContainer";
+import { toastError, toastSuccess } from "./stores/toastStore";
 
 function App() {
-  const [status, setStatus] = createSignal("unknown");
-  const [version, setVersion] = createSignal("");
-
   onMount(async () => {
     try {
       const res: any = await invoke("health_check");
       if (res && res.ok) {
-        setStatus("connected");
-        setVersion(res.version || "");
+        console.log("Backend connected:", res.version);
+        toastSuccess("Connected to backend");
       } else {
-        setStatus("error");
+        console.error("Health check failed");
+        toastError("Backend health check failed");
       }
     } catch (e) {
-      console.error(e);
-      setStatus("error");
+      console.error("Backend connection error:", e);
+      toastError("Failed to connect to backend");
     }
   });
 
-  async function emitDemo() {
-    try {
-      await invoke("emit_demo_event");
-      console.log("emit_demo_event invoked");
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
   return (
-    <div style={{ padding: "24px", "font-family": "sans-serif" }}>
-      <h1>VideoTranscriber</h1>
-      <div>
-        Backend status: <strong>{status()}</strong>
-        {version() && <span> — v{version()}</span>}
+    <>
+      <div style={{ "min-height": "100vh", "background-color": "#fafafa" }}>
+        <Router>
+          <Route path="/" component={QueuePage} />
+          <Route path="/detail/:id" component={DetailPage} />
+          <Route path="/settings" component={SettingsPage} />
+        </Router>
       </div>
-
-      <section style={{ margin: "24px 0 0 0" }}>
-        <h2>Queue</h2>
-        <div
-          style={{
-            border: "1px dashed #ccc",
-            padding: "16px",
-            height: "200px",
-            display: "flex",
-            "align-items": "center",
-            "justify-content": "center",
-          }}
-        >
-          {/* Empty queue placeholder */}
-        </div>
-        <div style={{ "margin-top": "12px" }}>
-          <button onClick={emitDemo}>Emit demo event</button>
-        </div>
-      </section>
-    </div>
+      <ToastContainer />
+    </>
   );
 }
 

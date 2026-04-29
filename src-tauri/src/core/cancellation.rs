@@ -60,10 +60,7 @@ impl CancellationManager {
 
     /// Get or create cancellation token for a job
     pub fn get_or_create(&self, job_id: JobId) -> CancellationToken {
-        self.tokens
-            .entry(job_id)
-            .or_insert_with(CancellationToken::new)
-            .clone()
+        self.tokens.entry(job_id).or_default().clone()
     }
 
     /// Cancel a specific job

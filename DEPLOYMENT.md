@@ -43,7 +43,28 @@ cargo run --features with_tauri
 
 ## Building for Release
 
-### Single Platform
+### Option 1: Automated CI/CD with GitHub Actions (Recommended)
+
+See [PACKAGING.md](./PACKAGING.md) for complete instructions.
+
+**Quick start:**
+```bash
+# Create version tag
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions automatically:
+1. Builds Windows NSIS + MSI installers
+2. Runs all tests and linting
+3. Creates GitHub Release with artifacts
+4. Generates release notes from commits
+
+See `.github/workflows/release-windows.yml` for the workflow definition.
+
+### Option 2: Local Build
+
+**Single Platform:**
 
 ```bash
 # Navigate to backend
@@ -58,15 +79,15 @@ Binary location:
 - **macOS:** `target/release/slova-tauri`
 - **Linux:** `target/release/slova-tauri`
 
-### Creating Installers
+**Creating Installers:**
 
 Tauri supports bundling:
 
 ```bash
 cd src-tauri
 
-# Windows: Creates MSI and NSIS installers
-cargo tauri build --config "{ \"build\": { \"beforeDevCommand\": \"\", \"beforeBuildCommand\": \"cd ../apps/ui && npm run build\" } }"
+# Windows: Creates MSI and NSIS installers with bundled FFmpeg
+cargo tauri build
 
 # macOS: Creates DMG
 cargo tauri build --target universal-apple-darwin
@@ -109,49 +130,66 @@ This creates:
 
 ## Publishing Releases
 
-### 1. Create GitHub Release
+### 1. Automated Release (GitHub Actions)
+
+**Best for CI/CD:**
 
 ```bash
+# Update versions in code
+# Edit Cargo.toml, package.json, tauri.conf.json with new version
+
 # Create release tag
 git tag v0.2.0
 git push origin v0.2.0
 
-# Create release on GitHub with notes
-# - Go to https://github.com/iurii-izman/slova/releases
-# - Click "Create a new release"
-# - Tag version: v0.2.0
-# - Add release notes from CHANGELOG.md
-# - Upload binaries and installers
+# GitHub Actions automatically:
+# - Builds all installers
+# - Runs tests and linting
+# - Creates release on GitHub
+# - Uploads artifacts
 ```
+
+Monitor progress at: **GitHub Actions** tab
 
 ### 2. Manual Distribution
 
-1. Build for all platforms (see above)
+If building locally:
+
+1. Build for all platforms (see [Option 2](#option-2-local-build) above)
 2. Collect binaries/installers:
-   - Windows: `.exe` installer
+   - Windows: `.exe` and `.msi` installers
    - macOS: `.dmg` file
    - Linux: `.AppImage` or `.deb`
 3. Create checksums:
    ```bash
-   sha256sum slova-tauri.exe > slova-tauri.exe.sha256
-   sha256sum slova-tauri-*.dmg > slova-tauri.dmg.sha256
-   sha256sum slova-tauri*.AppImage > slova-tauri.AppImage.sha256
+   sha256sum VideoTranscriber_0.2.0_installer_x64.exe > sha256sums.txt
+   sha256sum VideoTranscriber_0.2.0_x64.msi >> sha256sums.txt
    ```
-4. Upload to release with checksums
+4. Go to [GitHub Releases](https://github.com/iurii-izman/slova/releases)
+5. Click "Create a new release"
+6. Tag version: `v0.2.0`
+7. Add release notes from [CHANGELOG.md](./CHANGELOG.md)
+8. Upload binaries, installers, and checksums
+9. Publish
 
-### 3. Auto-Update (Future)
+### 3. Auto-Update (When Ready)
+
+See [PACKAGING.md — Auto-Update Configuration](./PACKAGING.md#auto-update-configuration).
 
 When implemented, use Tauri Updater:
 
 ```bash
-# Generate signature
-cargo tauri build -- --sign-updates
+# Generate signature key (one time)
+cargo tauri signer generate --ci
+
+# Build and sign
+cargo tauri build -- --sign-updates-key YOUR_PRIVATE_KEY
 ```
 
 This creates:
-- Private key for signing
+- Signed updates manifest
 - Public key for Tauri config
-- Signed release manifest
+- Releases are auto-delivered to users
 
 ## Cross-Compilation
 
@@ -178,7 +216,24 @@ rustup target add x86_64-pc-windows-gnu
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-## Code Signing (macOS)
+## Code Signing
+
+### Windows Code Signing (Optional)
+
+⚠️ **See [PACKAGING.md — Code Signing & Security](./PACKAGING.md#code-signing--security) for detailed instructions.**
+
+To avoid "Unknown publisher" warning on installer:
+
+1. Purchase Authenticode certificate from trusted CA (Sectigo, DigiCert, etc.)
+2. Store `.pfx` file securely — **never commit to repo**
+3. Set GitHub Actions secrets (if using CI):
+   - `CERTIFICATE_PFX_BASE64` — base64-encoded .pfx
+   - `CERTIFICATE_PASSWORD` — private key password
+4. Uncomment signing step in `.github/workflows/release-windows.yml`
+
+**Default (no signing):** Windows shows warning, but app installs fine. Recommended for open-source projects.
+
+### macOS Code Signing (When Applicable)
 
 ### Prerequisites
 - Apple Developer Account
@@ -254,32 +309,37 @@ xcrun altool --notarization-history \
 
 ### Pre-Release Checklist
 
-- [ ] Rust: `cargo test`
-- [ ] TypeScript: `npm run check`, `npm run build`
-- [ ] Linting: `cargo clippy`, `cargo fmt --check`
+See [PACKAGING.md — Release Checklist](./PACKAGING.md#release-checklist) for comprehensive checklist.
+
+**Quick checks:**
+- [ ] Update version in `Cargo.toml`, `package.json`, `tauri.conf.json`
+- [ ] Update `CHANGELOG.md` with release notes
+- [ ] Rust: `cargo test --lib`
+- [ ] TypeScript: `npm run check` and `npm run build`
+- [ ] Linting: `cargo clippy`, `cargo fmt -- --check`
 - [ ] No hardcoded secrets or API keys
-- [ ] No debug prints or logging at info level
-- [ ] Keyboard shortcuts work
-- [ ] Drag & drop works on all platforms
-- [ ] Settings persist across restarts
-- [ ] API key storage works (test on target platform)
-- [ ] Database migrations work fresh
-- [ ] Error messages are user-friendly
+- [ ] Build locally: `cargo tauri build`
+- [ ] Test installer on Windows 10, 11
+- [ ] Test uninstall process
+- [ ] Verify API key storage in Credential Manager
 
 ### Platform-Specific Testing
 
 **Windows:**
-- Test on Windows 10, 11
+- Test NSIS installer with default settings
+- Test MSI installer with default settings
 - Test installer/uninstaller
 - Test Windows Defender interactions
+- Verify FFmpeg/ffprobe extraction
+- Check Start Menu shortcuts
 
-**macOS:**
+**macOS (Future):**
 - Test on Intel and Apple Silicon
 - Test code signing/notarization
 - Test Gatekeeper interactions
 - Test auto-update (once implemented)
 
-**Linux:**
+**Linux (Future):**
 - Test on Ubuntu 20.04, 22.04
 - Test on Fedora, Debian variants
 - Test AppImage permissions

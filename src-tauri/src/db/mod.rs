@@ -8,6 +8,8 @@
 // - File content hashes (for deduplication)
 // - Failed job logs (for retry analysis)
 
+#![allow(dead_code)] // Some repository methods prepared for future phases
+
 mod migrations;
 
 #[cfg(test)]
@@ -136,6 +138,8 @@ impl JobRepo {
             JobState::Stitching => "Stitching",
             JobState::Postprocessing => "Postprocessing",
             JobState::Done { .. } => "Done",
+            JobState::Cached { .. } => "Cached",
+            JobState::Skipped { .. } => "Skipped",
             JobState::Failed { .. } => "Failed",
             JobState::Cancelled => "Cancelled",
             JobState::Paused => "Paused",
@@ -270,7 +274,7 @@ impl JobRepo {
 
 /// Transcript cache and edits repository
 pub struct TranscriptRepo {
-    pool: SqlitePool,
+    pub pool: SqlitePool,
 }
 
 impl TranscriptRepo {

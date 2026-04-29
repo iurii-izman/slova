@@ -51,6 +51,7 @@ export type Settings = {
 export type JobSettings = {
   language: string;
   output_format: ExportFormat;
+  enable_postprocess: boolean;
 };
 
 export type JobFilter = {

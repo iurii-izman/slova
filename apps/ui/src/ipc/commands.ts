@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Job,
@@ -105,6 +105,20 @@ export async function exportJob(id: JobId, format: ExportFormat): Promise<string
  */
 export async function saveApiKey(key: string): Promise<void> {
   return await invoke("save_api_key", { key });
+}
+
+/**
+ * Проверить наличие сохранённого API ключа.
+ */
+export async function checkApiKey(): Promise<boolean> {
+  return await invoke("check_api_key");
+}
+
+/**
+ * Удалить API ключ из OS keychain.
+ */
+export async function deleteApiKey(): Promise<void> {
+  return await invoke("delete_api_key");
 }
 
 /**

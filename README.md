@@ -79,25 +79,137 @@ cd ../..
 
 ### Running Development Mode
 
-**Terminal 1 — UI Dev Server:**
+Run in two terminals for fastest development experience:
+
+**Terminal 1 — Frontend Dev Server:**
 ```bash
 cd apps/ui
 npm run dev
 ```
+Starts on `http://localhost:5173` with hot-reload
 
-The Vite dev server starts on `http://localhost:5173`
-
-**Terminal 2 — Tauri Application:**
+**Terminal 2 — Tauri Backend + App:**
 ```bash
-cd src-tauri
-cargo run --features with_tauri
+# From project root
+cargo tauri dev
 ```
+
+This will:
+1. Compile the Rust backend
+2. Open the Tauri application window connected to your dev server
+3. Watch for Rust changes and recompile
+
+**Why separate terminals?** 
+- Frontend hot-reloads instantly (~100ms)
+- Backend recompiles on save (~2-5 seconds)
+- Both work in parallel for fast iteration
+
+### Building for Release
+
+First ensure UI is built:
+
+```bash
+cd apps/ui
+npm run build
+```
+
+Then build the production installer:
+
+```bash
+cargo tauri build
+```
+
+**Output:**
+- NSIS installer: `target/release/bundle/nsis/VideoTranscriber_0.1.0_installer_x64.exe`
+- MSI installer: `target/release/bundle/msi/VideoTranscriber_0.1.0_x64.msi`
+
+See [PACKAGING.md](./PACKAGING.md) for complete build and release instructions, including:
+- Environment setup
+- Code signing
+- Auto-update configuration
+- Windows troubleshooting
+- Release checklist
+
+## Troubleshooting & Logs
+
+### Enabling Debug Logging
+
+If you encounter issues, enable debug logging to see detailed operation steps:
+
+```bash
+# Windows PowerShell
+$env:RUST_LOG="debug"
+cd src-tauri && cargo run --features with_tauri
+
+# Linux/macOS
+export RUST_LOG=debug
+cd src-tauri && cargo run --features with_tauri
+```
+
+### Accessing Log Files
+
+Logs are saved with daily rotation:
+- **Windows:** `%APPDATA%\Roaming\slova\logs\`
+- **macOS:** `~/Library/Application Support/slova/logs/`
+- **Linux:** `~/.local/share/slova/logs/`
+
+**In-App Access:**
+- From Settings → "View Logs" button to open logs folder
+- Or use the backend API: `invoke('get_logs', { lines: 100 })`
+
+### Getting Your Groq API Key
+
+1. **Create account on Groq Console:**
+   - Visit https://console.groq.com
+   - Sign up with Google, GitHub, or email
+   - Verify your email
+
+2. **Generate API Key:**
+   - After login, go to [API Keys](https://console.groq.com/keys)
+   - Click "Create New Secret Key"
+   - Copy the key (it looks like: `gsk_...`)
+   - ⚠️ Save it somewhere safe — you won't see it again
+
+3. **Add to VideoTranscriber:**
+   - Open VideoTranscriber → Settings (gear icon)
+   - Paste your API key in "🔐 API Key" section
+   - Click "Save API Key"
+   - Confirm it shows "✓ API key is configured"
+
+### Common Issues
+
+**"No API key found in keyring"**
+- Follow steps above to get and save your API key
+- Check that you copied the full key (usually starts with `gsk_`)
+- Restart the app after saving the key
+
+**"FFmpeg not found"**
+- Install FFmpeg: `choco install ffmpeg` (Windows), `brew install ffmpeg` (macOS), `apt install ffmpeg` (Linux)
+- Or place ffmpeg.exe / ffprobe.exe in app data directory
+
+**Job stuck in "Extracting" state**
+- Check if ffmpeg is working: `ffmpeg -version`
+- Check logs (Debug level) for detailed error
+- Manual retry: Click "Retry" button in UI
+
+**Transcription timeout (>30s)**
+- Check internet connection
+- Check Groq API status: https://status.groq.com
+- Try smaller file or enable debug logs to see API response time
+
+### Security Notes
+
+- **API Keys:** Stored in OS keychain only, never logged
+- **Transcripts:** Not logged at DEBUG level
+- **Logs:** Check `SECURITY.md` for what data is logged
+- **Report Issues:** See `SECURITY.md` for vulnerability reporting
 
 ## Project Documentation
 
 ### Architecture
 - **[transcriber-spec.md](./transcriber-spec.md)** — Original technical specification
 - **[transcriber-architecture-analysis.md](./transcriber-architecture-analysis.md)** — Target architecture & detailed design
+- **[SECURITY.md](./SECURITY.md)** — Security & logging policy, startup recovery, best practices
 - **[CYCLE-2-COMPLETION.md](./CYCLE-2-COMPLETION.md)** — Cycle 2 implementation report (13/13 blocks completed)
 
 ### Development Guides
@@ -339,14 +451,59 @@ cargo run --features with_tauri --release
 - **[TESTING-GUIDE.md](./TESTING-GUIDE.md)** — Running tests despite Windows Defender
 - **[docs/zed-ai-workflow.md](./docs/zed-ai-workflow.md)** — Zed editor development workflow
 
-## Security
+## Security & Logging
 
-🔒 **Security-First Design:**
+### 🔒 Security-First Design
 
 ✅ **Implemented:**
-- API keys stored in OS keychain (never in code or database)
-- Type-safe error handling (no stringly-typed errors)
-- No hardcoded secrets or credentials
+- **API Keys:** Stored securely in OS keychain (Windows: Windows Credential Manager, macOS: Keychain, Linux: Secret Service). Never logged or persisted to disk.
+- **Sensitive Data:** Transcript content and API requests are not logged at DEBUG level
+- **Type-Safe Errors:** All errors use structured `AppErrorView` enum, no raw strings
+- **Process Security:** FFmpeg/FFprobe executed via safe process API with argument arrays (no shell injection)
+- **Input Validation:** All file paths, settings, and API inputs validated before use
+- **CSP:** Content Security Policy configured to allow only necessary resources
+- **Permissions:** Tauri capabilities restricted to required APIs only
+
+⚠️ **Best Practices:**
+- Don't share logs containing API requests with untrusted parties
+- API key should be unique per installation; regenerate if suspected compromise
+- Keep FFmpeg updated for security patches
+- Review logs in `%APPDATA%/Roaming/slova/logs/` (Windows) or `~/.local/share/slova/logs/` (Linux)
+
+### 📊 Logging & Diagnostics
+
+**Log Storage:**
+- **Path:** `%APPDATA%/Roaming/slova/logs/` (Windows), `~/.local/share/slova/logs/` (Linux), `~/Library/Application Support/slova/logs/` (macOS)
+- **Format:** Text files with daily rotation (e.g., `transcriber.log.2024-01-15`)
+- **Size:** Logs are rotated daily; old files are preserved for 7 days
+
+**Log Levels:**
+- `INFO` (default): Job state transitions, API calls, recovery events
+- `DEBUG`: Detailed operation info (use `RUST_LOG=debug` to enable)
+- `WARN`: Recoverable errors, retries, rate limits
+- `ERROR`: Critical failures, panics
+
+**Environment Variables:**
+```bash
+# Set log level (default: info)
+set RUST_LOG=debug
+
+# More verbose (all modules)
+set RUST_LOG=debug,hyper=info,tokio=info
+
+# Specific modules only
+set RUST_LOG=slova_tauri=debug
+```
+
+**In-App Access:**
+- Open Settings → "View Logs" button to open logs folder in file explorer
+- Or call backend API `get_logs(lines: 100)` to fetch last N log lines
+
+**Troubleshooting with Logs:**
+1. Enable DEBUG logging: `RUST_LOG=debug cargo run --features with_tauri`
+2. Reproduce the issue
+3. Check logs for error messages and stack traces
+4. Use `panic!()` backtraces: logs will show full bacls
 - Safe process execution for FFmpeg/FFprobe
 - Input validation on all endpoints
 - Secure file path handling (no shell injection)

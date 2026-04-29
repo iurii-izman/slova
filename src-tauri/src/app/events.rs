@@ -10,13 +10,14 @@ use crate::types::*;
 
 /// Event emitter for the app
 /// TODO: implement with throttling and batching
+#[derive(Default)]
 pub struct EventEmitter {
     // TODO: channels for event distribution
 }
 
 impl EventEmitter {
     pub fn new() -> Self {
-        EventEmitter {}
+        Self::default()
     }
 
     /// Emit a batched queue:tick event with job updates

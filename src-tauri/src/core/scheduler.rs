@@ -55,6 +55,7 @@ impl JobScheduler {
         groq: Arc<GroqClient>,
         job_repo: Arc<JobRepo>,
         progress: ProgressBroadcaster,
+        postprocess_model: String,
     ) -> Self {
         JobScheduler {
             cpu_sem: Arc::new(Semaphore::new(2)),
@@ -62,7 +63,13 @@ impl JobScheduler {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             cancellations: Arc::new(CancellationManager::new()),
             is_paused: Arc::new(AtomicBool::new(false)),
-            pipeline: Arc::new(Pipeline::new(ffmpeg, groq, job_repo, progress)),
+            pipeline: Arc::new(Pipeline::new(
+                ffmpeg,
+                groq,
+                job_repo,
+                progress,
+                postprocess_model,
+            )),
             retry_policy: Arc::new(RetryPolicy::default()),
         }
     }
@@ -176,7 +183,6 @@ impl Default for JobScheduler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_scheduler_creation() {

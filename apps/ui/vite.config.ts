@@ -6,11 +6,11 @@ export default defineConfig({
   build: {
     target: "esnext",
     rollupOptions: {
-      external: ["@tauri-apps/api", "@tauri-apps/api/tauri", "@tauri-apps/api/event"],
+      external: ["@tauri-apps/api", "@tauri-apps/api/core", "@tauri-apps/api/event"],
       output: {
         globals: {
           "@tauri-apps/api": "tauriApi",
-          "@tauri-apps/api/tauri": "tauriApi.tauri",
+          "@tauri-apps/api/core": "tauriApi.core",
           "@tauri-apps/api/event": "tauriApi.event",
         },
       },

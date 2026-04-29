@@ -1,7 +1,7 @@
 // ============================================================================
 // Pipeline: End-to-End Job Processing State Machine
 // ============================================================================
-// Orchestrates: Probing → Extracting → Uploading → Transcribing → Writing → Done
+// Orchestrates: Probing → Extracting → Chunking → Transcribing → Stitching → Writing → Done
 //
 // Responsibilities:
 // - State transitions with persistence to SQLite
@@ -17,7 +17,7 @@ use crate::core::progress::ProgressBroadcaster;
 use crate::core::retry::RetryPolicy;
 use crate::core::stages::{self, PipelineCtx};
 use crate::db::JobRepo;
-use crate::types::{AppErrorView, JobId, JobState};
+use crate::types::{AppErrorView, JobId, JobState, TranscriptSegment};
 use std::sync::Arc;
 
 /// Pipeline executor with all dependencies injected
@@ -26,7 +26,9 @@ pub struct Pipeline {
     groq: Arc<GroqClient>,
     job_repo: Arc<JobRepo>,
     progress: ProgressBroadcaster,
+    #[allow(dead_code)]
     retry_policy: RetryPolicy,
+    postprocess_model: String, // Model for Llama postprocessing (e.g. llama-3.1-8b-instant)
 }
 
 impl Pipeline {
@@ -35,6 +37,7 @@ impl Pipeline {
         groq: Arc<GroqClient>,
         job_repo: Arc<JobRepo>,
         progress: ProgressBroadcaster,
+        postprocess_model: String,
     ) -> Self {
         Pipeline {
             ffmpeg,
@@ -42,6 +45,7 @@ impl Pipeline {
             job_repo,
             progress,
             retry_policy: RetryPolicy::default(),
+            postprocess_model,
         }
     }
 
@@ -130,13 +134,32 @@ impl Pipeline {
             return Ok(());
         }
 
-        // Stage 3: Upload (state update) + Stage 4: Transcribe
+        // Stage 3: Chunking (if needed for files >100 MB)
         if cancel_token.is_cancelled() {
             return Err(AppErrorView::new("CANCELLED", "Job cancelled by user"));
         }
 
-        // For now, upload and transcribe are combined in groq.transcribe()
-        // In a future enhancement, we could split these for better progress tracking
+        let chunk_result = stages::chunk(ctx, &self.ffmpeg).await?;
+        ctx.job.state = chunk_result.state.clone();
+        self.progress.report(crate::core::progress::ProgressEvent {
+            job_id: ctx.job.id,
+            state: chunk_result.state.clone(),
+            bytes_uploaded: None,
+            eta_ms: None,
+        });
+        self.job_repo
+            .update_state(ctx.job.id, &chunk_result.state)
+            .await?;
+
+        if !chunk_result.should_continue {
+            return Ok(());
+        }
+
+        // Stage 4: Transcribe (handles single chunk or multiple chunks)
+        if cancel_token.is_cancelled() {
+            return Err(AppErrorView::new("CANCELLED", "Job cancelled by user"));
+        }
+
         let transcribe_result = stages::transcribe(ctx, &self.groq).await?;
         ctx.job.state = transcribe_result.state.clone();
         self.progress.report(crate::core::progress::ProgressEvent {
@@ -153,7 +176,68 @@ impl Pipeline {
             return Ok(());
         }
 
-        // Stage 5: Write
+        // Stage 5: Stitching (if chunking was used)
+        if cancel_token.is_cancelled() {
+            return Err(AppErrorView::new("CANCELLED", "Job cancelled by user"));
+        }
+
+        if ctx.chunks.len() > 1 {
+            // Multiple chunks: need to stitch
+            let stitch_result = stages::stitch_transcript(ctx).await?;
+            ctx.job.state = stitch_result.state.clone();
+            self.progress.report(crate::core::progress::ProgressEvent {
+                job_id: ctx.job.id,
+                state: stitch_result.state.clone(),
+                bytes_uploaded: None,
+                eta_ms: None,
+            });
+            self.job_repo
+                .update_state(ctx.job.id, &stitch_result.state)
+                .await?;
+
+            if !stitch_result.should_continue {
+                return Ok(());
+            }
+        } else {
+            // Single chunk: just copy segments and text
+            if !ctx.chunk_transcripts.is_empty() {
+                let chunk_tx = &ctx.chunk_transcripts[0];
+                ctx.transcript_raw = chunk_tx.text.clone();
+                ctx.segments = chunk_tx
+                    .segments
+                    .iter()
+                    .map(|seg| TranscriptSegment {
+                        start_ms: (seg.start * 1000.0) as u64 + chunk_tx.chunk_start_ms,
+                        end_ms: (seg.end * 1000.0) as u64 + chunk_tx.chunk_start_ms,
+                        text: seg.text.clone(),
+                    })
+                    .collect();
+            }
+        }
+
+        // Stage 6: Postprocessing (optional)
+        if cancel_token.is_cancelled() {
+            return Err(AppErrorView::new("CANCELLED", "Job cancelled by user"));
+        }
+
+        let postprocess_result =
+            stages::postprocess_transcript(ctx, &self.groq, &self.postprocess_model).await?;
+        ctx.job.state = postprocess_result.state.clone();
+        self.progress.report(crate::core::progress::ProgressEvent {
+            job_id: ctx.job.id,
+            state: postprocess_result.state.clone(),
+            bytes_uploaded: None,
+            eta_ms: None,
+        });
+        self.job_repo
+            .update_state(ctx.job.id, &postprocess_result.state)
+            .await?;
+
+        if !postprocess_result.should_continue {
+            return Ok(());
+        }
+
+        // Stage 7: Write
         if cancel_token.is_cancelled() {
             return Err(AppErrorView::new("CANCELLED", "Job cancelled by user"));
         }
@@ -212,7 +296,6 @@ pub async fn run_with_retry(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_pipeline_creation() {

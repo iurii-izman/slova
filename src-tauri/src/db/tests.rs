@@ -44,6 +44,7 @@ mod repository_tests {
             settings_snapshot: JobSettings {
                 language: "ru".to_string(),
                 output_format: ExportFormat::Txt,
+                enable_postprocess: false,
             },
             content_hash: Some(format!("hash_{}", idx)),
         }

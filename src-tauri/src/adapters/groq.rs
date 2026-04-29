@@ -14,7 +14,7 @@ use crate::types::AppErrorView;
 use reqwest::header::{HeaderMap, AUTHORIZATION, RETRY_AFTER};
 use reqwest::multipart;
 use reqwest::Client;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
@@ -84,17 +84,15 @@ impl RateLimiter {
 impl GroqClient {
     /// Create new Groq client from API key
     pub fn new(api_key: String) -> Result<Self, AppErrorView> {
-        if api_key.trim().is_empty() {
-            return Err(AppErrorView::auth_failed());
-        }
-
         let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            format!("Bearer {}", api_key)
-                .parse()
-                .map_err(|_| AppErrorView::internal_error("Invalid API key format"))?,
-        );
+        if !api_key.trim().is_empty() {
+            headers.insert(
+                AUTHORIZATION,
+                format!("Bearer {}", api_key)
+                    .parse()
+                    .map_err(|_| AppErrorView::internal_error("Invalid API key format"))?,
+            );
+        }
 
         let http = Client::builder()
             .default_headers(headers)
@@ -120,6 +118,10 @@ impl GroqClient {
         audio_path: &Path,
         opts: TranscribeOpts,
     ) -> Result<TranscribeResult, AppErrorView> {
+        if self._api_key.expose_secret().trim().is_empty() {
+            return Err(AppErrorView::auth_failed());
+        }
+
         // Validate file exists and get size
         let file_meta = tokio::fs::metadata(audio_path)
             .await
@@ -289,11 +291,173 @@ impl GroqClient {
     }
 
     /// Postprocess transcript via Groq Llama
-    /// Cleans punctuation, grammar, formatting
-    pub async fn postprocess(&self, text: String) -> Result<String, AppErrorView> {
-        // TODO: implement llama-3.1-8b-instant call
-        // For now, return original text
-        Ok(text)
+    /// Cleans punctuation, grammar, formatting without changing meaning
+    pub async fn postprocess(&self, text: String, model: &str) -> Result<String, AppErrorView> {
+        if self._api_key.expose_secret().trim().is_empty() {
+            return Err(AppErrorView::auth_failed());
+        }
+
+        let url = format!("{}/chat/completions", self.base_url);
+        let client = self.http.clone();
+
+        // Acquire rate limit token
+        {
+            let mut limiter = self.rate_limiter.lock().await;
+            limiter.acquire().await;
+        }
+
+        // Build safety prompt that strictly forbids meaning changes
+        let system_prompt = "You are a transcript cleaner. Your task is to:
+1. Fix punctuation and capitalization
+2. Improve readability with proper spacing
+3. Correct obvious typos
+4. Add paragraph breaks where appropriate
+
+STRICT RULES (DO NOT VIOLATE):
+- NEVER change the meaning of any words
+- NEVER add facts not in the original text
+- NEVER translate to another language
+- NEVER remove important words or concepts
+- NEVER reorder sentences
+- Keep all names, places, and technical terms exactly as they appear
+- Return ONLY the cleaned transcript, nothing else";
+
+        let user_message = format!(
+            "Clean this transcript (remember: preserve ALL meaning):\n\n{}",
+            text
+        );
+
+        let request_body = serde_json::json!({
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": user_message
+                }
+            ],
+            "temperature": 0.3,  // Low temp for consistency
+            "max_tokens": std::cmp::min(text.len() as i32 * 2, 8000),  // Allow growth for formatting
+        });
+
+        // Manual retry loop with exponential backoff
+        let mut attempt = 0u32;
+        let max_attempts = 3;
+        let max_elapsed = Duration::from_secs(60);
+        let start_time = Instant::now();
+
+        loop {
+            // Check if max elapsed time exceeded
+            if start_time.elapsed() > max_elapsed {
+                return Err(AppErrorView::internal_error(
+                    "Postprocessing timeout (>60s)",
+                ));
+            }
+
+            match client.post(&url).json(&request_body).send().await {
+                Ok(response) => {
+                    let status = response.status();
+
+                    // Handle rate limit
+                    if status == 429 {
+                        let retry_secs = response
+                            .headers()
+                            .get(RETRY_AFTER)
+                            .and_then(|h| h.to_str().ok())
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(30);
+
+                        attempt += 1;
+                        if attempt >= max_attempts {
+                            return Err(AppErrorView::rate_limit(Some(retry_secs as u32)));
+                        }
+                        tokio::time::sleep(Duration::from_secs(retry_secs)).await;
+                        continue;
+                    }
+
+                    // Auth errors: no retry
+                    if status == 401 {
+                        return Err(AppErrorView::auth_failed());
+                    }
+
+                    // Server errors: retry
+                    if status.is_server_error() {
+                        attempt += 1;
+                        if attempt >= max_attempts {
+                            return Err(AppErrorView::internal_error(format!(
+                                "Groq server error: {} (after {} attempts)",
+                                status, attempt
+                            )));
+                        }
+                        let delay = Duration::from_secs(1u64 << attempt.min(3));
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+
+                    // Other 4xx: no retry
+                    if status.is_client_error() {
+                        let text = response
+                            .text()
+                            .await
+                            .unwrap_or_else(|_| String::from("Unknown error"));
+                        return Err(AppErrorView::new(
+                            "POSTPROCESS_ERROR",
+                            format!("Groq postprocess error: {}", text),
+                        ));
+                    }
+
+                    // Success: parse and extract message
+                    if status.is_success() {
+                        match response.json::<ChatCompletionResponse>().await {
+                            Ok(resp) => {
+                                if let Some(choice) = resp.choices.first() {
+                                    return Ok(choice.message.content.trim().to_string());
+                                } else {
+                                    return Err(AppErrorView::internal_error(
+                                        "Empty response from postprocessing",
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                return Err(AppErrorView::internal_error(format!(
+                                    "Failed to parse postprocess response: {}",
+                                    e
+                                )))
+                            }
+                        }
+                    } else {
+                        return Err(AppErrorView::internal_error(format!(
+                            "Unexpected status: {}",
+                            status
+                        )));
+                    }
+                }
+                Err(e) => {
+                    // Network errors: transient (retry)
+                    if e.is_timeout() || e.is_connect() {
+                        attempt += 1;
+                        if attempt >= max_attempts {
+                            return Err(AppErrorView::network_error(format!(
+                                "Postprocessing network error (after {} attempts): {}",
+                                attempt, e
+                            )));
+                        }
+                        let delay = Duration::from_secs(1u64 << attempt.min(3));
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    } else {
+                        // Other errors: permanent
+                        return Err(AppErrorView::network_error(format!(
+                            "Postprocessing request failed: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -347,8 +511,11 @@ pub struct TranscriptSegmentResult {
 
 #[derive(Debug, Deserialize)]
 struct VerboseJsonResponse {
+    #[allow(dead_code)]
     task: String,
+    #[allow(dead_code)]
     language: String,
+    #[allow(dead_code)]
     duration: f32,
     text: String,
     segments: Vec<VerboseSegment>,
@@ -356,7 +523,9 @@ struct VerboseJsonResponse {
 
 #[derive(Debug, Deserialize)]
 struct VerboseSegment {
+    #[allow(dead_code)]
     id: u32,
+    #[allow(dead_code)]
     seek: u32,
     start: f32,
     end: f32,
@@ -390,7 +559,27 @@ impl From<VerboseJsonResponse> for TranscribeResult {
 }
 
 // ============================================================================
+// Groq Chat Completions Response (for postprocessing via Llama)
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionResponse {
+    choices: Vec<ChatCompletionChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionChoice {
+    message: ChatCompletionMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionMessage {
+    content: String,
+}
+
+// ============================================================================
 // Unit Tests
+// ============================================================================
 // ============================================================================
 
 #[cfg(test)]
@@ -477,6 +666,49 @@ mod tests {
     fn test_error_classification_network() {
         let err = AppErrorView::network_error("Connection timeout");
         assert_eq!(err.code, "NETWORK_ERROR");
+    }
+
+    #[test]
+    fn test_postprocess_prompt_safety() {
+        // Verify that the postprocessing prompt includes safety constraints
+        let prompt = "You are a transcript cleaner. Your task is to:\n\
+1. Fix punctuation and capitalization\n\
+2. Improve readability with proper spacing\n\
+3. Correct obvious typos\n\
+4. Add paragraph breaks where appropriate\n\
+\nSTRICT RULES (DO NOT VIOLATE):\n\
+- NEVER change the meaning of any words\n\
+- NEVER add facts not in the original text\n\
+- NEVER translate to another language\n\
+- NEVER remove important words or concepts\n\
+- NEVER reorder sentences\n\
+- Keep all names, places, and technical terms exactly as they appear\n\
+- Return ONLY the cleaned transcript, nothing else";
+
+        assert!(prompt.contains("NEVER change the meaning"));
+        assert!(prompt.contains("NEVER add facts"));
+        assert!(prompt.contains("NEVER translate"));
+        assert!(prompt.contains("NEVER remove important"));
+    }
+
+    #[test]
+    fn test_chat_completion_response_parsing() {
+        let json = r#"{
+            "choices": [
+                {
+                    "message": {
+                        "content": "Привет, мир! Это тестовая запись."
+                    }
+                }
+            ]
+        }"#;
+
+        let response: ChatCompletionResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.choices.len(), 1);
+        assert_eq!(
+            response.choices[0].message.content,
+            "Привет, мир! Это тестовая запись."
+        );
     }
 }
 

@@ -1,12 +1,18 @@
 use crate::adapters::keyring::KeyringAdapter;
 use crate::app::state::SharedState;
+#[allow(unused)]
+use crate::core::cache;
+use crate::core::export::{export_transcript as export_transcript_impl, ConflictPolicy};
 use crate::types::*;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sqlx::Row;
+#[allow(unused)]
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[derive(Serialize)]
 pub struct HealthStatus {
@@ -67,6 +73,9 @@ pub async fn enqueue_files(
         }
     }
 
+    // Load current settings from DB (with defaults as fallback)
+    let settings = app_state.get_settings_from_db().await.unwrap_or_default(); // Fallback to defaults if DB unavailable
+
     // Create jobs and enqueue them
     let mut job_ids = Vec::new();
     let now = chrono::Utc::now().to_rfc3339();
@@ -94,8 +103,9 @@ pub async fn enqueue_files(
             created_at: now.clone(),
             state: JobState::Queued,
             settings_snapshot: JobSettings {
-                language: "ru".into(),
-                output_format: ExportFormat::Txt,
+                language: settings.language.clone(),
+                output_format: settings.output_format,
+                enable_postprocess: settings.enable_postprocess,
             },
             content_hash: hash,
         };
@@ -212,6 +222,7 @@ pub async fn resume_queue(state: tauri::State<'_, SharedState>) -> Result<(), Ap
 // ============================================================================
 
 /// Получить текст транскрипции для задачи
+/// Сначала проверяет отредактированный текст из БД, затем из файла
 #[tauri::command]
 pub async fn get_transcript(
     state: tauri::State<'_, SharedState>,
@@ -222,11 +233,20 @@ pub async fn get_transcript(
         .as_ref()
         .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
 
-    // Try to load from .txt file (once written)
+    // First try to get edited transcript from database
+    if let Ok(Some(edited_text)) = app_state.transcript_repo.get_edited(id).await {
+        return Ok(Transcript {
+            job_id: id,
+            text: edited_text,
+        });
+    }
+
+    // Then try to load from .txt file
     if let Some(job) = app_state.job_repo.get(id).await? {
         let txt_path = job.source_path.with_extension("txt");
         if txt_path.exists() {
-            let text = std::fs::read_to_string(&txt_path)
+            let text = tokio::fs::read_to_string(&txt_path)
+                .await
                 .map_err(|e| AppErrorView::fs_error(format!("Failed to read transcript: {}", e)))?;
             return Ok(Transcript { job_id: id, text });
         }
@@ -240,6 +260,7 @@ pub async fn get_transcript(
 }
 
 /// Сохранить отредактированный текст транскрипции
+/// Сохраняет в БД и обновляет .txt файл
 #[tauri::command]
 pub async fn save_transcript_edit(
     state: tauri::State<'_, SharedState>,
@@ -258,29 +279,26 @@ pub async fn save_transcript_edit(
         .as_ref()
         .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
 
-    // Save to database
-    app_state
-        .job_repo
-        .update_state(
-            id,
-            &JobState::Done {
-                output_path: Default::default(),
-                duration_ms: 0,
-            },
-        )
-        .await?;
-
-    // Also save edited text to .txt file
+    // Save edited text to database
     if let Some(job) = app_state.job_repo.get(id).await? {
+        // Update transcript with edited text
+        app_state.transcript_repo.update(id, text.clone()).await?;
+
+        // Also update the .txt file
         let txt_path = job.source_path.with_extension("txt");
-        std::fs::write(&txt_path, &text)
+        tokio::fs::write(&txt_path, &text)
+            .await
             .map_err(|e| AppErrorView::fs_error(format!("Failed to save transcript: {}", e)))?;
+    } else {
+        return Err(AppErrorView::internal_error("Job not found"));
     }
 
     Ok(())
 }
 
 /// Экспортировать результат в выбранный формат
+/// Поддерживает TXT, SRT и JSON
+/// Не делает повторных Groq-запросов, использует кэшированные сегменты
 #[tauri::command]
 pub async fn export(
     state: tauri::State<'_, SharedState>,
@@ -298,13 +316,47 @@ pub async fn export(
         .await?
         .ok_or_else(|| AppErrorView::internal_error("Job not found"))?;
 
-    let ext = match format {
+    // Get transcript text (prefer edited if available)
+    let text = if let Ok(Some(edited)) = app_state.transcript_repo.get_edited(id).await {
+        edited
+    } else if let Ok(Some(plain)) = app_state.transcript_repo.get(id).await {
+        plain
+    } else {
+        return Err(AppErrorView::internal_error(
+            "No transcript found for this job",
+        ));
+    };
+
+    // Get segments from database
+    let row = sqlx::query("SELECT segments_json FROM transcripts WHERE job_id = ?")
+        .bind(id.0.to_string())
+        .fetch_optional(&app_state.transcript_repo.pool)
+        .await
+        .map_err(|e| AppErrorView::internal_error(format!("Database error: {}", e)))?;
+
+    let segments: Vec<TranscriptSegment> = if let Some(r) = row {
+        let segments_json: String = r.get("segments_json");
+        serde_json::from_str(&segments_json).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let format_str = match format {
         ExportFormat::Txt => "txt",
         ExportFormat::Srt => "srt",
         ExportFormat::Json => "json",
     };
 
-    let output_path = job.source_path.with_extension(ext);
+    let base_path = job.source_path.with_extension("");
+    let output_path = export_transcript_impl(
+        &text,
+        &segments,
+        format_str,
+        &base_path,
+        ConflictPolicy::Overwrite,
+    )
+    .await?;
+
     Ok(output_path)
 }
 
@@ -333,22 +385,88 @@ pub async fn save_api_key(key: String) -> Result<(), AppErrorView> {
     // Store securely in OS keyring
     KeyringAdapter::save_api_key(&key)?;
 
-    println!("API key saved to OS keychain successfully");
+    tracing::info!("API key saved to OS keychain successfully");
     Ok(())
+}
+
+/// Проверить наличие сохранённого API ключа
+#[tauri::command]
+pub async fn check_api_key() -> Result<bool, AppErrorView> {
+    KeyringAdapter::has_api_key()
+        .map_err(|e| AppErrorView::internal_error(format!("Failed to check API key: {}", e)))
+}
+
+/// Удалить API ключ из OS keychain
+#[tauri::command]
+pub async fn delete_api_key() -> Result<(), AppErrorView> {
+    KeyringAdapter::delete_api_key()
+        .map_err(|e| AppErrorView::internal_error(format!("Failed to delete API key: {}", e)))
 }
 
 /// Получить текущие настройки приложения
 #[tauri::command]
-pub async fn get_settings(_state: tauri::State<'_, SharedState>) -> Result<Settings, AppErrorView> {
-    // TODO: load from SQLite settings repo
-    // For now return defaults
-    Ok(Settings::default())
+pub async fn get_settings(state: tauri::State<'_, SharedState>) -> Result<Settings, AppErrorView> {
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    let defaults = Settings::default();
+
+    // Try to load each setting from DB, fall back to defaults
+    let language = app_state
+        .settings_repo
+        .get("language")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(defaults.language);
+
+    let output_format_str = app_state
+        .settings_repo
+        .get("output_format")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "txt".to_string());
+    let output_format = match output_format_str.as_str() {
+        "srt" => ExportFormat::Srt,
+        "json" => ExportFormat::Json,
+        _ => ExportFormat::Txt,
+    };
+
+    let parallelism_str = app_state
+        .settings_repo
+        .get("parallelism")
+        .await
+        .ok()
+        .flatten();
+    let parallelism = parallelism_str
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(defaults.parallelism);
+
+    let enable_postprocess_str = app_state
+        .settings_repo
+        .get("enable_postprocess")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "false".to_string());
+    let enable_postprocess = enable_postprocess_str == "true";
+
+    Ok(Settings {
+        language,
+        output_format,
+        parallelism,
+        enable_postprocess,
+        groq_model: defaults.groq_model,
+    })
 }
 
 /// Обновить настройки приложения
 #[tauri::command]
 pub async fn set_settings(
-    _state: tauri::State<'_, SharedState>,
+    state: tauri::State<'_, SharedState>,
     settings: Settings,
 ) -> Result<(), AppErrorView> {
     if settings.parallelism == 0 {
@@ -365,8 +483,50 @@ pub async fn set_settings(
         ));
     }
 
-    // TODO: save to SQLite settings repo
-    println!("Settings updated: parallelism={}", settings.parallelism);
+    let state_opt = state.read().await;
+    let app_state = state_opt
+        .as_ref()
+        .ok_or_else(|| AppErrorView::internal_error("App not initialized"))?;
+
+    // Save each setting to DB
+    app_state
+        .settings_repo
+        .set("language", &settings.language)
+        .await?;
+
+    let format_str = match settings.output_format {
+        ExportFormat::Srt => "srt",
+        ExportFormat::Json => "json",
+        ExportFormat::Txt => "txt",
+    };
+    app_state
+        .settings_repo
+        .set("output_format", format_str)
+        .await?;
+
+    app_state
+        .settings_repo
+        .set("parallelism", &settings.parallelism.to_string())
+        .await?;
+
+    app_state
+        .settings_repo
+        .set(
+            "enable_postprocess",
+            if settings.enable_postprocess {
+                "true"
+            } else {
+                "false"
+            },
+        )
+        .await?;
+
+    tracing::info!(
+        "Settings updated: language={}, parallelism={}, enable_postprocess={}",
+        settings.language,
+        settings.parallelism,
+        settings.enable_postprocess
+    );
     Ok(())
 }
 
@@ -390,6 +550,102 @@ pub async fn emit_demo_event(app_handle: tauri::AppHandle) -> Result<(), AppErro
     app_handle
         .emit("queue:tick", sample)
         .map_err(|e| AppErrorView::internal_error(format!("emit error: {}", e)))?;
+
+    Ok(())
+}
+
+// ============================================================================
+// Logging Commands
+// ============================================================================
+
+/// Get recent log entries from file
+#[tauri::command]
+pub async fn get_logs(
+    app_handle: tauri::AppHandle,
+    lines: Option<u32>,
+) -> Result<Vec<String>, AppErrorView> {
+    let log_lines = lines.unwrap_or(100).min(1000); // Cap at 1000 lines for performance
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppErrorView::internal_error(format!("Failed to get app data dir: {}", e)))?;
+
+    let log_dir = crate::telemetry::get_log_dir(&app_data_dir);
+
+    // Find the current log file (today's file)
+    let mut log_entries = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&log_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("log") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                    // Get last N lines
+                    let start_idx = if lines.len() > log_lines as usize {
+                        lines.len() - log_lines as usize
+                    } else {
+                        0
+                    };
+                    log_entries.extend_from_slice(&lines[start_idx..]);
+                }
+            }
+        }
+    }
+
+    // Return last N lines across all log files
+    let start_idx = if log_entries.len() > log_lines as usize {
+        log_entries.len() - log_lines as usize
+    } else {
+        0
+    };
+
+    Ok(log_entries[start_idx..].to_vec())
+}
+
+/// Open the logs folder in the system file explorer
+#[tauri::command]
+pub async fn open_logs_folder(app_handle: tauri::AppHandle) -> Result<(), AppErrorView> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppErrorView::internal_error(format!("Failed to get app data dir: {}", e)))?;
+
+    let log_dir = crate::telemetry::get_log_dir(&app_data_dir);
+
+    // Create directory if it doesn't exist
+    std::fs::create_dir_all(&log_dir)
+        .map_err(|e| AppErrorView::fs_error(format!("Failed to create log dir: {}", e)))?;
+
+    // Platform-specific folder opening
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        Command::new("explorer")
+            .arg(log_dir.as_os_str())
+            .spawn()
+            .map_err(|e| AppErrorView::internal_error(format!("Failed to open folder: {}", e)))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        Command::new("open")
+            .arg(log_dir.as_os_str())
+            .spawn()
+            .map_err(|e| AppErrorView::internal_error(format!("Failed to open folder: {}", e)))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        Command::new("xdg-open")
+            .arg(log_dir.as_os_str())
+            .spawn()
+            .map_err(|e| AppErrorView::internal_error(format!("Failed to open folder: {}", e)))?;
+    }
+
+    tracing::info!("Opening logs folder at {}", log_dir.display());
 
     Ok(())
 }

@@ -49,6 +49,15 @@ impl KeyringAdapter {
         }
     }
 
+    /// Check if API key is stored
+    pub fn has_api_key() -> Result<bool, AppErrorView> {
+        match Self::get_api_key() {
+            Ok(Some(_)) => Ok(true),
+            Ok(None) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Delete API key from OS keychain
     pub fn delete_api_key() -> Result<(), AppErrorView> {
         let entry = keyring::Entry::new(SERVICE_NAME, GROQ_KEY)

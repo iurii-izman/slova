@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Many types are prepared for future implementation phases
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -26,6 +28,53 @@ impl Default for JobId {
 impl std::fmt::Display for JobId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+// ============================================================================
+// Cache & Deduplication
+// ============================================================================
+
+/// Full content hash using BLAKE3 (hex string, 64 chars)
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ContentHash(pub String);
+
+impl ContentHash {
+    pub fn new(hash_hex: String) -> Self {
+        ContentHash(hash_hex)
+    }
+}
+
+/// Fingerprint of settings (language, prompt, model, etc.)
+/// Used to determine if cache is valid when settings change
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SettingsFingerprint(pub String);
+
+impl SettingsFingerprint {
+    pub fn new(fingerprint_hex: String) -> Self {
+        SettingsFingerprint(fingerprint_hex)
+    }
+}
+
+/// Cache key: combination of content hash + settings fingerprint
+/// Two files with same content and same settings should have same cache key
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CacheKey(pub String);
+
+impl CacheKey {
+    pub fn new(content_hash: &ContentHash, settings_fingerprint: &SettingsFingerprint) -> Self {
+        CacheKey(format!("{}-{}", content_hash.0, settings_fingerprint.0))
+    }
+}
+
+/// Weak key for batch deduplication: size + mtime + hash of first 1MB
+/// Used to quickly identify obvious duplicates within current enqueue batch
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct WeakKey(pub String);
+
+impl WeakKey {
+    pub fn new(size: u64, mtime: u64, partial_hash: &str) -> Self {
+        WeakKey(format!("{}-{}-{}", size, mtime, partial_hash))
     }
 }
 
@@ -66,6 +115,15 @@ pub enum JobState {
         output_path: PathBuf,
         duration_ms: u64,
     },
+
+    /// Результат получен из кэша (не было вызова API)
+    Cached {
+        output_path: PathBuf,
+        duration_ms: u64,
+    },
+
+    /// Пропущено (найден дубликат в текущей очереди)
+    Skipped { duplicate_of: JobId },
 
     /// Ошибка с деталями
     Failed { error: AppErrorView, attempts: u32 },
@@ -120,6 +178,8 @@ impl Default for Settings {
 pub struct JobSettings {
     pub language: String,
     pub output_format: ExportFormat,
+    #[serde(default)]
+    pub enable_postprocess: bool,
 }
 
 impl Default for JobSettings {
@@ -127,11 +187,12 @@ impl Default for JobSettings {
         JobSettings {
             language: "ru".into(),
             output_format: ExportFormat::Txt,
+            enable_postprocess: false,
         }
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     Txt,
@@ -154,6 +215,30 @@ pub struct TranscriptSegment {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+}
+
+/// Full transcript with segments and metadata
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FullTranscript {
+    pub job_id: JobId,
+    pub text: String,
+    pub segments: Vec<TranscriptSegment>,
+    pub duration_ms: u64,
+}
+
+/// Segments data from Groq response (temporary during processing)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GroqSegment {
+    pub start: f32,
+    pub end: f32,
+    pub text: String,
+}
+
+/// Full Groq transcription response
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GroqTranscription {
+    pub text: String,
+    pub segments: Vec<GroqSegment>,
 }
 
 // ============================================================================
