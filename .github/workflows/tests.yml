@@ -1,104 +1,89 @@
-name: Tests
+name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 env:
   RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
 
 jobs:
-  rust-tests:
-    name: Rust Tests
+  rust:
+    name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [stable]
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Install Rust
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          toolchain: ${{ matrix.rust }}
+          workspaces: |
+            src-tauri -> target
 
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cargo check
+        working-directory: src-tauri
+        run: cargo check --all-targets
 
-      - name: Cache cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cargo fmt (check)
+        working-directory: src-tauri
+        run: cargo fmt -- --check
 
-      - name: Cache cargo build
-        uses: actions/cache@v3
-        with:
-          path: src-tauri/target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run cargo check
-        run: |
-          cd src-tauri
-          cargo check --all-targets
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test --lib
 
-      - name: Run cargo fmt check
-        run: |
-          cd src-tauri
-          cargo fmt -- --check
-
-      - name: Run cargo clippy
-        run: |
-          cd src-tauri
-          cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: |
-          cd src-tauri
-          cargo test --lib
-
-  typescript-checks:
-    name: TypeScript Checks
+  ui:
+    name: UI (TypeScript + build)
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: 'apps/ui/package-lock.json'
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/ui/package-lock.json
 
       - name: Install dependencies
-        run: |
-          cd apps/ui
-          npm install
+        working-directory: apps/ui
+        run: npm ci
 
       - name: Type check
-        run: |
-          cd apps/ui
-          npm run check
+        working-directory: apps/ui
+        run: npm run check
 
       - name: Build
-        run: |
-          cd apps/ui
-          npm run build
+        working-directory: apps/ui
+        run: npm run build
 
-  security-audit:
+  security:
     name: Security Audit
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Run cargo audit
-        uses: rustsec/audit-check-action@v1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust audit
+        uses: rustsec/audit-check-action@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

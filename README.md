@@ -1,660 +1,112 @@
-# VideoTranscriber
+# Slova
 
-> Batch transcription of video files to text using Groq Whisper Large v3 Turbo API
+> Fast desktop batch transcription with Groq Whisper (Tauri 2 + Rust + Solid.js)
 
-A modern desktop application for transcribing videos to text with high speed and accuracy. Built with Tauri 2, Rust, Solid.js, and Groq's lightning-fast Whisper API.
-
-[![Tests](https://github.com/iurii-izman/slova/actions/workflows/tests.yml/badge.svg)](https://github.com/iurii-izman/slova/actions)
+[![CI](https://github.com/iurii-izman/slova/actions/workflows/tests.yml/badge.svg)](https://github.com/iurii-izman/slova/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Cycle 2: Core Pipeline ✅](https://img.shields.io/badge/Cycle%202-Core%20Pipeline%20✅-brightgreen)](./CYCLE-2-COMPLETION.md)
-
-## 📊 Project Status
-
-**Current Cycle:** Cycle 2 — Core Scheduler & E2E Pipeline ✅
-- ✅ **Core modules implemented** (5 new: cancellation, progress, retry, stages, pipeline)
-- ✅ **JobScheduler with semaphores** (2 CPU, 3 network)
-- ✅ **State machine pipeline** (Queued → Probing → Extracting → Transcribing → Done)
-- ✅ **38/38 unit tests passing**
-- 🔄 **Frontend UI integration** (next)
-- 🔄 **Fallback chunking for large files** (next)
-
-See [CYCLE-2-COMPLETION.md](./CYCLE-2-COMPLETION.md) for detailed architecture and [QUICKSTART-PIPELINE.md](./QUICKSTART-PIPELINE.md) for API reference.
-
-## Features
-
-✨ **Core Features (MVP):**
-- 🚀 **Lightning-fast transcription** — ~8 seconds per 30-minute video
-- 📺 **Batch processing** — Queue multiple videos for parallel processing
-- 🔒 **Secure API key storage** — OS keychain integration (Windows, macOS, Linux)
-- ⚙️ **Audio preprocessing** — Automatic Opus encoding at 16kHz, 32kbps
-- 🔄 **Smart retry logic** — Exponential backoff with jitter (100ms-30s)
-- 🎯 **Parallel execution** — CPU-bound and network-bound stage limits
-- 💾 **Atomic writes** — Transactional .txt file output
-- 📊 **State persistence** — All jobs saved in SQLite
-
-🚧 **In Development (Cycle 3+):**
-- 📝 **Rich editing** — Edit transcripts inline with preview
-- 💾 **Export formats** — TXT, SRT, JSON with timestamps
-- 📈 **Progress UI** — Real-time queue and per-job updates
-- 🔀 **Fallback chunking** — Split files >100MB into chunks
-- 🧹 **Postprocessing** — Optional Groq Llama cleanup
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Desktop Framework** | [Tauri 2](https://tauri.app) |
-| **Backend** | [Rust](https://www.rust-lang.org) + [Tokio](https://tokio.rs) |
-| **Frontend** | [Solid.js](https://www.solidjs.com) + [TypeScript](https://www.typescriptlang.org) + [Vite](https://vitejs.dev) |
-| **Database** | [SQLite](https://www.sqlite.org) with migrations |
-| **STT Engine** | [Groq Whisper Large v3 Turbo](https://groq.com) |
-| **Secrets** | OS keychain via [keyring](https://crates.io/crates/keyring) |
-| **Media Processing** | FFmpeg/FFprobe binaries |
-
-## Quick Start
-
-### Prerequisites
-
-- **Rust 1.70+** — [Install](https://rustup.rs)
-- **Node.js 18+** — [Download](https://nodejs.org)
-- **pnpm/npm/yarn** — Package manager
-- **FFmpeg & FFprobe** — [Download](https://ffmpeg.org/download.html) or install via package manager
-  - Windows: `choco install ffmpeg` or `winget install ffmpeg`
-  - macOS: `brew install ffmpeg`
-  - Linux: `apt install ffmpeg` / `dnf install ffmpeg`
-- **Groq API Key** — [Get free key](https://console.groq.com) (30 RPM free tier)
-
-### Installation & Development
-
-```bash
-# Clone the repository
-git clone https://github.com/iurii-izman/slova.git
-cd slova
-
-# Install frontend dependencies
-cd apps/ui
-npm install
-cd ../..
-```
-
-### Running Development Mode
-
-Run in two terminals for fastest development experience:
-
-**Terminal 1 — Frontend Dev Server:**
-```bash
-cd apps/ui
-npm run dev
-```
-Starts on `http://localhost:5173` with hot-reload
-
-**Terminal 2 — Tauri Backend + App:**
-```bash
-# From project root
-cargo tauri dev
-```
-
-This will:
-1. Compile the Rust backend
-2. Open the Tauri application window connected to your dev server
-3. Watch for Rust changes and recompile
-
-**Why separate terminals?** 
-- Frontend hot-reloads instantly (~100ms)
-- Backend recompiles on save (~2-5 seconds)
-- Both work in parallel for fast iteration
-
-### Building for Release
-
-First ensure UI is built:
 
-```bash
-cd apps/ui
-npm run build
-```
+Slova is a desktop app for transcribing video/audio files into text with queue processing, retries, and secure API key storage.
 
-Then build the production installer:
+## Stack
 
-```bash
-cargo tauri build
-```
+- **Desktop:** Tauri 2
+- **Backend:** Rust + Tokio
+- **Frontend:** Solid.js + TypeScript + Vite
+- **Storage:** SQLite
+- **Secrets:** OS keychain (`keyring`)
+- **STT:** Groq Whisper Large v3 Turbo
+- **Media:** ffmpeg/ffprobe (+ optional rnnoise `cb.rnnn`)
 
-**Output:**
-- NSIS installer: `target/release/bundle/nsis/VideoTranscriber_0.1.0_installer_x64.exe`
-- MSI installer: `target/release/bundle/msi/VideoTranscriber_0.1.0_x64.msi`
+## Current status
 
-See [PACKAGING.md](./PACKAGING.md) for complete build and release instructions, including:
-- Environment setup
-- Code signing
-- Auto-update configuration
-- Windows troubleshooting
-- Release checklist
-
-## Troubleshooting & Logs
-
-### Enabling Debug Logging
-
-If you encounter issues, enable debug logging to see detailed operation steps:
-
-```bash
-# Windows PowerShell
-$env:RUST_LOG="debug"
-cd src-tauri && cargo run --features with_tauri
-
-# Linux/macOS
-export RUST_LOG=debug
-cd src-tauri && cargo run --features with_tauri
-```
-
-### Accessing Log Files
-
-Logs are saved with daily rotation:
-- **Windows:** `%APPDATA%\Roaming\slova\logs\`
-- **macOS:** `~/Library/Application Support/slova/logs/`
-- **Linux:** `~/.local/share/slova/logs/`
-
-**In-App Access:**
-- From Settings → "View Logs" button to open logs folder
-- Or use the backend API: `invoke('get_logs', { lines: 100 })`
-
-### Getting Your Groq API Key
-
-1. **Create account on Groq Console:**
-   - Visit https://console.groq.com
-   - Sign up with Google, GitHub, or email
-   - Verify your email
-
-2. **Generate API Key:**
-   - After login, go to [API Keys](https://console.groq.com/keys)
-   - Click "Create New Secret Key"
-   - Copy the key (it looks like: `gsk_...`)
-   - ⚠️ Save it somewhere safe — you won't see it again
-
-3. **Add to VideoTranscriber:**
-   - Open VideoTranscriber → Settings (gear icon)
-   - Paste your API key in "🔐 API Key" section
-   - Click "Save API Key"
-   - Confirm it shows "✓ API key is configured"
-
-### Common Issues
-
-**"No API key found in keyring"**
-- Follow steps above to get and save your API key
-- Check that you copied the full key (usually starts with `gsk_`)
-- Restart the app after saving the key
-
-**"FFmpeg not found"**
-- Install FFmpeg: `choco install ffmpeg` (Windows), `brew install ffmpeg` (macOS), `apt install ffmpeg` (Linux)
-- Or place ffmpeg.exe / ffprobe.exe in app data directory
-
-**Job stuck in "Extracting" state**
-- Check if ffmpeg is working: `ffmpeg -version`
-- Check logs (Debug level) for detailed error
-- Manual retry: Click "Retry" button in UI
-
-**Transcription timeout (>30s)**
-- Check internet connection
-- Check Groq API status: https://status.groq.com
-- Try smaller file or enable debug logs to see API response time
-
-### Security Notes
-
-- **API Keys:** Stored in OS keychain only, never logged
-- **Transcripts:** Not logged at DEBUG level
-- **Logs:** Check `SECURITY.md` for what data is logged
-- **Report Issues:** See `SECURITY.md` for vulnerability reporting
-
-## Project Documentation
-
-### Architecture
-- **[transcriber-spec.md](./transcriber-spec.md)** — Original technical specification
-- **[transcriber-architecture-analysis.md](./transcriber-architecture-analysis.md)** — Target architecture & detailed design
-- **[SECURITY.md](./SECURITY.md)** — Security & logging policy, startup recovery, best practices
-- **[CYCLE-2-COMPLETION.md](./CYCLE-2-COMPLETION.md)** — Cycle 2 implementation report (13/13 blocks completed)
-
-### Development Guides
-- **[QUICKSTART-PIPELINE.md](./QUICKSTART-PIPELINE.md)** — API reference and usage examples
-- **[docs/zed-ai-workflow.md](./docs/zed-ai-workflow.md)** — Local Zed workflow for AI-assisted development
-- **[transcriber-autopilot-development-plan.md](./transcriber-autopilot-development-plan.md)** — Development blocks and prompts
-
-### Implementation Details
-- **[docs/ffmpeg-adapter.md](./docs/ffmpeg-adapter.md)** — FFmpeg integration and audio extraction
-- **[docs/groq-network-layer.md](./docs/groq-network-layer.md)** — Groq API client and error handling
-
-## Code Structure
-
-```
-slova/
-├── src-tauri/                  # Rust backend (Tauri + core logic)
-│   ├── src/
-│   │   ├── adapters/          # External service wrappers
-│   │   │   ├── ffmpeg.rs      # FFmpeg/FFprobe bindings
-│   │   │   ├── groq.rs        # Groq API client
-│   │   │   └── keyring.rs     # OS keyring secrets
-│   │   ├── app/               # Tauri layer
-│   │   │   ├── commands.rs    # IPC command handlers
-│   │   │   ├── state.rs       # AppState initialization
-│   │   │   └── events.rs      # Event structures
-│   │   ├── core/              # Domain logic
-│   │   │   ├── scheduler.rs   # Job queue + semaphores
-│   │   │   ├── pipeline.rs    # State machine executor
-│   │   │   ├── stages.rs      # Individual processing stages
-│   │   │   ├── retry.rs       # Backoff + error classification
-│   │   │   ├── progress.rs    # Event broadcasting
-│   │   │   └── cancellation.rs # Cancellation tokens
-│   │   ├── db/                # SQLite persistence
-│   │   │   ├── migrations.rs  # Schema migrations
-│   │   │   └── mod.rs         # Job/Transcript repositories
-│   │   ├── types/             # Shared types
-│   │   └── main.rs            # Tauri app entry
-│   └── Cargo.toml             # Rust dependencies
-├── apps/ui/                   # Solid.js frontend (TODO)
-└── docs/                      # Documentation
-```
-
-## Testing
-
-```bash
-# Run all tests
-cd src-tauri
-cargo test --features with_tauri
-
-# Run specific test
-cargo test core::pipeline::tests --features with_tauri
-
-# With logging
-RUST_LOG=slova_tauri=debug cargo test --features with_tauri
-```
-
-**Current Status:** ✅ 38/38 unit tests passing
-
-## Development Commands
-
-```bash
-# Format code
-cargo fmt
-
-# Check for errors
-cargo check --features with_tauri
-
-# Clippy lints
-cargo clippy --features with_tauri
-
-# Full build
-cargo build --features with_tauri --release
-```
-
-## Configuration
-
-### API Key Setup
-```typescript
-await invoke('save_api_key', { key: 'gsk_...' });
-```
-Stored securely in OS keychain, never hardcoded or logged.
-
-### Job Processing
-```typescript
-// Enqueue files
-const jobIds = await invoke('enqueue_files', { 
-  paths: ['/path/to/video.mp4'] 
-});
-
-// Listen for updates
-listen('queue:tick', (event) => {
-  console.log(event.payload.updates);
-});
-
-// Get transcript
-const { text } = await invoke('get_transcript', { id: jobId });
-```
-
-The desktop app opens with hot-reload enabled for both Rust and TypeScript changes.
-
-### Building for Release
-
-```bash
-cd src-tauri
-cargo build --release
-```
-
-Binary location:
-- **Windows:** `src-tauri/target/release/slova-tauri.exe`
-- **macOS:** `src-tauri/target/release/slova-tauri`
-- **Linux:** `src-tauri/target/release/slova-tauri`
-
-## API Key Setup
-
-The app stores your Groq API key securely in the OS keychain:
-
-1. **Get a free API key:** [console.groq.com](https://console.groq.com)
-2. **Launch the app** and go to Settings
-3. **Paste your API key** — it's encrypted and stored locally
-4. **Save** — key is never logged or stored in database
-
-For headless/CI environments, the app can read from `GROQ_API_KEY` environment variable as fallback.
-
-## Project Structure
-
-```
-slova/
-├── apps/
-│   └── ui/                       # Frontend (Solid.js + TypeScript)
-│       ├── src/
-│       │   ├── components/       # UI components
-│       │   ├── pages/            # Page layouts
-│       │   ├── stores/           # Solid.js state management
-│       │   ├── ipc.ts            # Tauri command wrappers
-│       │   └── App.tsx
-│       ├── package.json
-│       ├── vite.config.ts
-│       └── tsconfig.json
-│
-├── src-tauri/                    # Backend (Rust + Tauri)
-│   ├── src/
-│   │   ├── main.rs               # Tauri app entry point
-│   │   ├── app/                  # Tauri commands & IPC handlers
-│   │   ├── core/                 # Business logic & pipeline
-│   │   ├── db/                   # Database layer & repositories
-│   │   ├── adapters/             # External service integrations
-│   │   │   ├── ffmpeg.rs         # FFmpeg wrapper
-│   │   │   ├── groq.rs           # Groq API client
-│   │   │   └── keyring.rs        # OS keychain integration
-│   │   ├── types.rs              # Domain types & errors
-│   │   └── telemetry.rs          # Logging & monitoring
-│   ├── Cargo.toml
-│   ├── tauri.conf.json
-│   └── build.rs
-│
-├── docs/
-│   └── zed-ai-workflow.md        # Development workflow with Zed
-│
-├── transcriber-spec.md           # Technical specification
-├── transcriber-architecture-analysis.md
-├── transcriber-autopilot-development-plan.md
-├── README.md                     # This file
-├── CONTRIBUTING.md
-├── LICENSE
-└── .gitignore
-```
-
-## Architecture
-
-The application follows a **layered architecture:**
-
-### 1. **Types Layer** (`src-tauri/src/types.rs`)
-Domain types with full serialization support:
-- `Job` — Task state machine (Queued → Done/Failed)
-- `JobState` — Detailed state with progress tracking
-- `AppErrorView` — Typed error handling
-
-### 2. **Database Layer** (`src-tauri/src/db/`)
-- SQLite with automatic migrations
-- Repository pattern for type-safe data access
-- Repos: `JobRepo`, `TranscriptRepo`, `CacheRepo`, `SettingsRepo`
-
-### 3. **Adapters Layer** (`src-tauri/src/adapters/`)
-- `FFmpegAdapter` — Safe wrapper for audio extraction
-- `GroqClient` — HTTP client for Groq API
-- `KeyringAdapter` — OS keychain integration
-
-### 4. **Core Layer** (`src-tauri/src/core/`)
-- `JobScheduler` — Orchestrates parallel processing
-- State machine with retry logic and exponential backoff
-- Progress tracking and event emission
-
-### 5. **App Layer** (`src-tauri/src/app/commands.rs`)
-Tauri IPC handlers (thin layer, no business logic):
-- `enqueue_files(paths)` → Job
-- `list_jobs(filter)` → Vec<Job>
-- `cancel_job(id)` → ()
-- `save_api_key(key)` → ()
-- And more...
-
-### 6. **Frontend Layer** (`apps/ui/`)
-Solid.js UI with:
-- Queue store (reactive job list)
-- Drag & Drop file upload
-- Real-time progress bars
-- Inline transcript editing
-
-## Usage
-
-### 1. Launch Application
-```bash
-cargo run --features with_tauri --release
-```
-
-### 2. Add Files
-- **Drag & Drop:** Drop MP4 files onto the queue area
-- **Click to Browse:** Use file picker (keyboard shortcut: `Ctrl+O`)
-
-### 3. Configure (Optional)
-- **Settings** → Adjust parallelism (1–10 jobs)
-- **API Key** → Paste Groq API key securely
-
-### 4. Monitor Progress
-- Each file shows state: Extracting → Uploading → Transcribing → Done
-- Real-time progress bars for upload and transcription
-- Estimated time to completion
-
-### 5. Edit & Export
-- Click job to view transcript
-- **Edit inline** with live preview
-- **Export** as TXT, SRT, or JSON with timestamps
-
-## Documentation
-
-- **[transcriber-spec.md](./transcriber-spec.md)** — Original technical specification with API comparison
-- **[transcriber-architecture-analysis.md](./transcriber-architecture-analysis.md)** — Detailed architecture and design decisions
-- **[transcriber-autopilot-development-plan.md](./transcriber-autopilot-development-plan.md)** — Development blocks and implementation strategy
-- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — Contribution guidelines
-- **[TESTING-GUIDE.md](./TESTING-GUIDE.md)** — Running tests despite Windows Defender
-- **[docs/zed-ai-workflow.md](./docs/zed-ai-workflow.md)** — Zed editor development workflow
-
-## Security & Logging
-
-### 🔒 Security-First Design
-
-✅ **Implemented:**
-- **API Keys:** Stored securely in OS keychain (Windows: Windows Credential Manager, macOS: Keychain, Linux: Secret Service). Never logged or persisted to disk.
-- **Sensitive Data:** Transcript content and API requests are not logged at DEBUG level
-- **Type-Safe Errors:** All errors use structured `AppErrorView` enum, no raw strings
-- **Process Security:** FFmpeg/FFprobe executed via safe process API with argument arrays (no shell injection)
-- **Input Validation:** All file paths, settings, and API inputs validated before use
-- **CSP:** Content Security Policy configured to allow only necessary resources
-- **Permissions:** Tauri capabilities restricted to required APIs only
-
-⚠️ **Best Practices:**
-- Don't share logs containing API requests with untrusted parties
-- API key should be unique per installation; regenerate if suspected compromise
-- Keep FFmpeg updated for security patches
-- Review logs in `%APPDATA%/Roaming/slova/logs/` (Windows) or `~/.local/share/slova/logs/` (Linux)
-
-### 📊 Logging & Diagnostics
-
-**Log Storage:**
-- **Path:** `%APPDATA%/Roaming/slova/logs/` (Windows), `~/.local/share/slova/logs/` (Linux), `~/Library/Application Support/slova/logs/` (macOS)
-- **Format:** Text files with daily rotation (e.g., `transcriber.log.2024-01-15`)
-- **Size:** Logs are rotated daily; old files are preserved for 7 days
-
-**Log Levels:**
-- `INFO` (default): Job state transitions, API calls, recovery events
-- `DEBUG`: Detailed operation info (use `RUST_LOG=debug` to enable)
-- `WARN`: Recoverable errors, retries, rate limits
-- `ERROR`: Critical failures, panics
-
-**Environment Variables:**
-```bash
-# Set log level (default: info)
-set RUST_LOG=debug
-
-# More verbose (all modules)
-set RUST_LOG=debug,hyper=info,tokio=info
-
-# Specific modules only
-set RUST_LOG=slova_tauri=debug
-```
-
-**In-App Access:**
-- Open Settings → "View Logs" button to open logs folder in file explorer
-- Or call backend API `get_logs(lines: 100)` to fetch last N log lines
-
-**Troubleshooting with Logs:**
-1. Enable DEBUG logging: `RUST_LOG=debug cargo run --features with_tauri`
-2. Reproduce the issue
-3. Check logs for error messages and stack traces
-4. Use `panic!()` backtraces: logs will show full bacls
-- Safe process execution for FFmpeg/FFprobe
-- Input validation on all endpoints
-- Secure file path handling (no shell injection)
-
-⚠️ **Future Considerations:**
-- Rate limiting for Groq API
-- Local user authentication for shared systems
-- Audit logging for transcript modifications
-- TLS verification for all API requests
-
-## Testing
-
-### Unit Tests
-```bash
-cd src-tauri
-cargo test
-```
-
-### Linting & Type Checking
-
-**Rust:**
-```bash
-cd src-tauri
-cargo fmt
-cargo clippy --all-targets --all-features
-```
-
-**TypeScript:**
-```bash
-cd apps/ui
-npm run check
-npm run build
-```
-
-### CI/CD
-
-Tests run automatically on push to `main` or `develop` branches via GitHub Actions. See [`.github/workflows/tests.yml`](./.github/workflows/tests.yml).
-
-## Performance Benchmarks
-
-Measured on Ryzen 3, 8GB RAM, Windows 11:
-
-| Operation | Time |
-|-----------|------|
-| FFmpeg audio extraction (30 min video) | ~5–7 sec |
-| Groq transcription (30 min audio) | ~8–15 sec |
-| **Total per file** | **~15–25 sec** |
-| **5 files parallel** | **~45–60 sec** |
-
-Groq is **216x faster** than real-time! (30 min audio in 8 seconds)
-
-## Development Workflow
-
-### With Zed Editor
-
-See [docs/zed-ai-workflow.md](./docs/zed-ai-workflow.md) for:
-- Zed configuration for Rust + TypeScript
-- AI assistant integration
-- Debug settings
-
-### Debugging
-
-**Rust:**
-```bash
-RUST_LOG=debug cargo run --features with_tauri
-```
-
-**Frontend:**
-Open DevTools (F12) and inspect logs from `console.log()` calls in Solid components.
-
-## Known Issues & Limitations
-
-⚠️ **Current Phase 1 Limitations:**
-- FFmpeg integration not yet implemented (returns placeholder error)
-- Groq API client not yet connected (returns placeholder error)
-- Job scheduler not yet running (commands are stubs)
-- UI doesn't update in real-time (frontend integration WIP)
-- No history persistence (DB layer ready, commands WIP)
-
-These are all planned for Phases 2–3. See [transcriber-autopilot-development-plan.md](./transcriber-autopilot-development-plan.md) for detailed roadmap.
-
-## Roadmap
-
-### Phase 1 ✅ Complete
-- Project scaffolding and architecture
-- Database schema and repositories
-- Type-safe error handling
-- OS keychain integration (skeleton)
-- Tauri command definitions
-
-### Phase 2 (In Progress)
-- Job scheduler with queue management
-- FFmpeg audio extraction
-- Groq API integration
-- Real-time progress tracking
-- Exponential backoff & retry
-
-### Phase 3 (Planned)
-- SRT/JSON export with timestamps
-- Transcript editing & persistence
-- Chunking for large files (>100 MB)
-- Postprocessing with Groq Llama
-- File deduplication by hash
-
-### Phase 4+ (Future)
-- Desktop installer (NSIS/DMG/AppImage)
-- Auto-updater
-- Settings UI (currently stubs)
-- Keyboard shortcuts
-- Dark mode support
-
-## Contributing
-
-We welcome contributions! Please read:
-1. [CONTRIBUTING.md](./CONTRIBUTING.md) — Contribution guidelines
-2. [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) — Community standards
-3. Check [Issues](https://github.com/iurii-izman/slova/issues) for open tasks
+- Queue + job states implemented
+- Settings UI + Groq API key save/delete implemented
+- Export formats: TXT/SRT/JSON
+- Rust unit tests and CI pipeline configured
+
+See:
+
+- `transcriber-spec.md`
+- `transcriber-architecture-analysis.md`
+- `transcriber-autopilot-development-plan.md`
+
+## Prerequisites
+
+- Rust stable
+- Node.js LTS (18+; CI uses 20)
+- npm (or pnpm/yarn for local work)
+- ffmpeg + ffprobe in PATH
+
+Windows may additionally require:
+
+- WebView2 Runtime
+- Visual Studio Build Tools + Windows SDK
+
+## Quick start
+
+1) Install frontend deps:
+
+- `cd apps/ui`
+- `npm install`
+
+2) Run in 2 terminals:
+
+- Terminal A: `cd apps/ui && npm run dev`
+- Terminal B (repo root): `cargo tauri dev`
+
+3) Open **Settings** in app and save your Groq API key.
+
+## Build (Windows installer)
+
+- `cd apps/ui && npm run build`
+- `cargo tauri build`
+
+Artifacts are generated under `src-tauri/target/release/bundle/`.
+
+## API key and privacy
+
+- API key is stored in OS keychain, not in repo
+- Audio is sent to Groq API during transcription
+- See `PRIVACY.md` and `SECURITY.md`
+
+## rnnoise model (`cb.rnnn`)
+
+Optional, but recommended for noisy audio.
+
+Expected path:
+
+- `resources/rnnoise-models/cb.rnnn`
+
+If missing, Slova continues without noise reduction.
+
+Details: `resources/rnnoise-models/README.md`
+
+## Development quality checks
+
+Frontend:
+
+- `cd apps/ui && npm run check`
+- `cd apps/ui && npm run build`
+
+Backend:
+
+- `cd src-tauri && cargo fmt -- --check`
+- `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings`
+- `cd src-tauri && cargo test --lib`
+
+## GitHub automation
+
+- CI: `.github/workflows/tests.yml`
+- Windows release pipeline: `.github/workflows/release-windows.yml`
+
+## Key docs
+
+- `FIRST-RUN.md` — first-time setup walkthrough
+- `GETTING-STARTED.md` — short startup guide
+- `BUILD-AND-RUN.md` — build/run commands
+- `docs/owner-decisions-v0.1.md` — product decisions for v0.1
+- `docs/user-actions-u-block.md` — manual user checklist (U1..U10)
 
 ## License
 
-This project is licensed under the **MIT License** — see [LICENSE](./LICENSE) file for details.
-
-## Citation
-
-If you use VideoTranscriber in your research or projects, please cite:
-
-```bibtex
-@software{videotranscriber2025,
-  title = {VideoTranscriber: Fast batch transcription with Groq Whisper},
-  author = {Izman, Yurii},
-  year = {2025},
-  url = {https://github.com/iurii-izman/slova}
-}
-```
-
-## Support
-
-- 📖 Check [documentation](./docs/)
-- 🐛 [Report bugs](https://github.com/iurii-izman/slova/issues)
-- 💬 [Discussions](https://github.com/iurii-izman/slova/discussions)
-- 📧 Contact maintainers
-
-## Acknowledgments
-
-- [Tauri](https://tauri.app) — Modern desktop framework
-- [Groq](https://groq.com) — Fast Whisper API
-- [Rust](https://www.rust-lang.org) — Systems programming language
-- [Solid.js](https://www.solidjs.com) — Lightweight reactive UI framework
-
----
-
-**Made with ❤️ for transcription enthusiasts.**
-
-[⬆ back to top](#videotranscriber)
+MIT
