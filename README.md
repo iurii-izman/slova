@@ -1,11 +1,22 @@
 # Slova
 
-> Fast desktop batch transcription with Groq Whisper (Tauri 2 + Rust + Solid.js)
+> Windows-first desktop batch transcription with Groq Whisper, queueing, and local transcript editing.
 
 [![CI](https://github.com/iurii-izman/slova/actions/workflows/tests.yml/badge.svg)](https://github.com/iurii-izman/slova/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)](https://github.com/iurii-izman/slova)
+[![Stack: Tauri 2](https://img.shields.io/badge/stack-Tauri%202%20%2B%20Rust%20%2B%20Solid.js-24C8DB)](https://github.com/iurii-izman/slova)
 
-Slova is a desktop app for transcribing video/audio files into text with queue processing, retries, and secure API key storage.
+Slova is a portfolio-grade transcription desktop app for turning video or audio
+files into text with queue processing, retry logic, export formats, and secure
+API key handling.
+
+## What It Demonstrates
+
+- Desktop product architecture with a Rust backend and typed UI boundary.
+- File-based transcription workflow with queue states and deterministic retries.
+- Local persistence, export formats, and secure secret handling.
+- Public-repo readiness: CI, tests, release workflow, and setup docs.
 
 ## Stack
 
@@ -21,7 +32,7 @@ Slova is a desktop app for transcribing video/audio files into text with queue p
 
 - Queue + job states implemented
 - Settings UI + Groq API key save/delete implemented
-- Export formats: TXT/SRT/JSON
+- Export formats: TXT / SRT / JSON
 - Rust unit tests and CI pipeline configured
 
 See:
@@ -42,7 +53,7 @@ Windows may additionally require:
 - WebView2 Runtime
 - Visual Studio Build Tools + Windows SDK
 
-## Quick start
+## Quick Start
 
 1) Install frontend deps:
 
@@ -63,7 +74,7 @@ Windows may additionally require:
 
 Artifacts are generated under `src-tauri/target/release/bundle/`.
 
-## API key and privacy
+## API Key and Privacy
 
 - API key is stored in OS keychain, not in repo
 - Audio is sent to Groq API during transcription
@@ -81,7 +92,7 @@ If missing, Slova continues without noise reduction.
 
 Details: `resources/rnnoise-models/README.md`
 
-## Development quality checks
+## Development Quality Checks
 
 Frontend:
 
@@ -94,12 +105,12 @@ Backend:
 - `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings`
 - `cd src-tauri && cargo test --lib`
 
-## GitHub automation
+## GitHub Automation
 
 - CI: `.github/workflows/tests.yml`
 - Windows release pipeline: `.github/workflows/release-windows.yml`
 
-## Key docs
+## Key Docs
 
 - `FIRST-RUN.md` — first-time setup walkthrough
 - `GETTING-STARTED.md` — short startup guide
