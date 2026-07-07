@@ -10,6 +10,9 @@ env:
   RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   rust:
     name: Rust (${{ matrix.os }})
@@ -21,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -54,18 +57,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: apps/ui/package-lock.json
 
       - name: Install dependencies
         working-directory: apps/ui
-        run: npm ci
+        run: npm install
 
       - name: Type check
         working-directory: apps/ui
@@ -81,9 +82,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate lockfile
+        run: cargo generate-lockfile
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
 
       - name: Rust audit
-        uses: rustsec/audit-check-action@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit
