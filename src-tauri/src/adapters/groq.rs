@@ -84,15 +84,17 @@ impl RateLimiter {
 impl GroqClient {
     /// Create new Groq client from API key
     pub fn new(api_key: String) -> Result<Self, AppErrorView> {
-        let mut headers = HeaderMap::new();
-        if !api_key.trim().is_empty() {
-            headers.insert(
-                AUTHORIZATION,
-                format!("Bearer {}", api_key)
-                    .parse()
-                    .map_err(|_| AppErrorView::internal_error("Invalid API key format"))?,
-            );
+        if api_key.trim().is_empty() {
+            return Err(AppErrorView::auth_failed());
         }
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            format!("Bearer {}", api_key)
+                .parse()
+                .map_err(|_| AppErrorView::internal_error("Invalid API key format"))?,
+        );
 
         let http = Client::builder()
             .default_headers(headers)

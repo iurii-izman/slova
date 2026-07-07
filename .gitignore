@@ -112,4 +112,3 @@ package-lock.json
 
 # Local Tauri build
 target/
-src-tauri/icons/icon.png
