@@ -11,6 +11,14 @@ Slova is a portfolio-grade transcription desktop app for turning video or audio
 files into text with queue processing, retry logic, export formats, and secure
 API key handling.
 
+## Public Review Path
+
+- [Quick start](QUICKSTART.md)
+- [Privacy boundary](PRIVACY.md)
+- [Release instructions](RELEASE-INSTRUCTIONS.md)
+- [Packaging notes](PACKAGING.md)
+- [Screenshots plan](docs/screenshots_plan.md)
+
 ## What It Demonstrates
 
 - Desktop product architecture with a Rust backend and typed UI boundary.
